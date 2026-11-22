@@ -20,7 +20,7 @@ jobs:
           install: git make autoconf libtool automake-wrapper jq patch
           pacboy: >-
             cmake:p ninja:p toolchain:p clang:p python-pip:p openssl:p vulkan-memory-allocator:p vulkan-devel:p
-            glslang:p boost:p lz4:p zlib:p zstd:p enet:p opus:p libusb:p SDL3:p ffmpeg:p ntldd:p
+            glslang:p boost:p lz4:p zlib:p zstd:p enet:p opus:p libusb:p sdl3:p ffmpeg:p ntldd:p
       - name: Configurer
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
