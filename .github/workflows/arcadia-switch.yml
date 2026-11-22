@@ -3,6 +3,7 @@ name: arcadia-switch
 on:
   push:
     branches: [arcadia-switch]
+    paths-ignore: ['.github/workflows/arcadia-switch-bin.yml', 'RUN_ID']
   workflow_dispatch:
 jobs:
   windows:

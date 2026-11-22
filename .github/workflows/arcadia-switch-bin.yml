@@ -1,0 +1,34 @@
+# Arcadia : dépose le moteur compilé sur la branche « arcadia-switch-bin » (récupération par git).
+name: arcadia-switch-bin
+on:
+  push:
+    branches: [arcadia-switch-fetch]
+permissions:
+  contents: write
+  actions: read
+jobs:
+  bin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: RUN_ID
+      - id: rid
+        run: echo "run_id=$(cat RUN_ID)" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v4
+        with:
+          name: arcadia-switch-windows
+          path: out
+          run-id: ${{ steps.rid.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Pousser
+        run: |
+          cd out
+          ls -la
+          git init -q -b arcadia-switch-bin
+          git config user.name "Arcadia"
+          git config user.email "arcadia@users.noreply.github.com"
+          echo "Moteur Switch d'Arcadia (Eden modifié, GPL-3.0). Sources : branche arcadia-switch. Compilation ${{ steps.rid.outputs.run_id }}." > LISEZMOI.txt
+          git add -A
+          git commit -q -m "Moteur Switch Arcadia (compilation ${{ steps.rid.outputs.run_id }})"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" arcadia-switch-bin
