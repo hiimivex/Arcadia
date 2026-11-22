@@ -25,6 +25,8 @@ else()
 endif()
 
 add_executable(yuzu-cmd
+    arcadia.cpp
+    arcadia.h
     emu_window/emu_window_sdl3.cpp
     emu_window/emu_window_sdl3.h
     emu_window/emu_window_sdl3_null.cpp
@@ -44,7 +46,7 @@ if (ENABLE_OPENGL)
 endif()
 target_link_libraries(yuzu-cmd PRIVATE ${PLATFORM_LIBRARIES} Threads::Threads)
 
-create_resource("../../dist/eden.bmp" "yuzu_cmd/yuzu_icon.h" "yuzu_icon")
+create_resource("../../dist/arcadia.bmp" "yuzu_cmd/yuzu_icon.h" "yuzu_icon")
 target_include_directories(yuzu-cmd PRIVATE ${RESOURCES_DIR})
 
 target_link_libraries(yuzu-cmd PRIVATE SDL3::SDL3)

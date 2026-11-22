@@ -36,6 +36,7 @@
 #include "input_common/main.h"
 #include "network/network.h"
 #include "sdl_config.h"
+#include "yuzu_cmd/arcadia.h"
 #include "video_core/gpu.h"
 #include "video_core/rasterizer_interface.h"
 #include "video_core/renderer_base.h"
@@ -252,12 +253,14 @@ extern "C" SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
         return SDL_APP_FAILURE;
     case Core::SystemResultStatus::ErrorLoader:
         LOG_CRITICAL(Frontend, "Failed to load ROM!");
+        Arcadia::Emit("{\"event\":\"error\",\"code\":\"loader\"}");
         return SDL_APP_FAILURE;
     case Core::SystemResultStatus::ErrorNotInitialized:
         LOG_CRITICAL(Frontend, "CPUCore not initialized");
         return SDL_APP_FAILURE;
     case Core::SystemResultStatus::ErrorVideoCore:
         LOG_CRITICAL(Frontend, "Failed to initialize VideoCore!");
+        Arcadia::Emit("{\"event\":\"error\",\"code\":\"video\"}");
         return SDL_APP_FAILURE;
     default:
         const u16 loader_id = u16(Core::SystemResultStatus::ErrorLoader);
@@ -267,6 +270,8 @@ extern "C" SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
             "refer to the Eden wiki for more information or the Eden discord for "
             "additional help.\n\nError Code: {:04X}-{:04X}\nError Description: {}",
             loader_id, error_id, Loader::GetResultStatusString(Loader::ResultStatus(error_id)));
+        Arcadia::Emit(std::format("{{\"event\":\"error\",\"code\":\"loader\",\"status\":{},\"message\":\"{}\"}}",
+            error_id, Loader::GetResultStatusString(Loader::ResultStatus(error_id))));
         return SDL_APP_FAILURE;
     }
 
@@ -320,6 +325,9 @@ extern "C" SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
         state->system.Run();
     });
 
+    Arcadia::Init(&state->input_subsystem, state->emu_window->GetSDLWindow());
+    Arcadia::Emit(std::format("{{\"event\":\"ready\",\"titleId\":\"{:016X}\"}}",
+        state->system.GetApplicationProcessProgramID()));
     void(state->system.Run());
     if (state->system.DebuggerEnabled())
         state->system.InitializeDebugger();
@@ -327,11 +335,13 @@ extern "C" SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
 }
 extern "C" SDL_AppResult SDL_AppIterate(void *appstate) {
     SdlState *state = (SdlState *)appstate;
+    Arcadia::Poll();
     return state->emu_window->IsOpen() ? SDL_APP_CONTINUE : SDL_APP_SUCCESS;
 }
 extern "C" SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
     SdlState *state = (SdlState *)appstate;
     state->emu_window->OnEvent(*event);
+    Arcadia::OnEvent(*event);
     return SDL_APP_CONTINUE;
 }
 extern "C" void SDL_AppQuit(void *appstate, SDL_AppResult result) {
@@ -339,6 +349,7 @@ extern "C" void SDL_AppQuit(void *appstate, SDL_AppResult result) {
     if (state == nullptr) {
         return;
     }
+    Arcadia::Shutdown();
     state->system.DetachDebugger();
     if (state->system.IsPoweredOn()) {
         state->system.Pause();

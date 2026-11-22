@@ -83,6 +83,27 @@ void VirtualGamepad::ResetControllers() {
     }
 }
 
+namespace {
+VirtualGamepad::VibrationCallback g_vibration_callback;
+}
+
+void VirtualGamepad::SetVibrationCallback(VibrationCallback callback) {
+    g_vibration_callback = std::move(callback);
+}
+
+Common::Input::DriverResult VirtualGamepad::SetVibration(
+    const PadIdentifier& identifier, const Common::Input::VibrationStatus& vibration) {
+    if (!g_vibration_callback) {
+        return Common::Input::DriverResult::NotSupported;
+    }
+    g_vibration_callback(identifier.port, vibration);
+    return Common::Input::DriverResult::Success;
+}
+
+bool VirtualGamepad::IsVibrationEnabled([[maybe_unused]] const PadIdentifier& identifier) {
+    return static_cast<bool>(g_vibration_callback);
+}
+
 PadIdentifier VirtualGamepad::GetIdentifier(std::size_t player_index) const {
     return {
         .guid = Common::UUID{},

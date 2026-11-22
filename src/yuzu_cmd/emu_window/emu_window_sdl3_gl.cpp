@@ -13,6 +13,7 @@
 
 #include <format>
 #include <glad/glad.h>
+#include "yuzu_cmd/arcadia.h"
 #include "common/logging.h"
 #include "common/scm_rev.h"
 #include "common/settings.h"
@@ -99,7 +100,7 @@ EmuWindow_SDL3_GL::EmuWindow_SDL3_GL(InputCommon::InputSubsystem* input_subsyste
         std::format("{} | {}-{}", std::string_view{Common::g_build_fullname},
                     std::string_view{Common::g_scm_branch}, std::string_view{Common::g_scm_desc});
     render_window =
-        SDL_CreateWindow(window_title.c_str(), Layout::ScreenUndocked::Width,
+        SDL_CreateWindow((Arcadia::WindowTitle().empty() ? window_title : Arcadia::WindowTitle()).c_str(), Layout::ScreenUndocked::Width,
                          Layout::ScreenUndocked::Height,
                          SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE |
                              SDL_WINDOW_HIGH_PIXEL_DENSITY);

@@ -10,6 +10,7 @@
 
 #include <format>
 
+#include "yuzu_cmd/arcadia.h"
 #include "common/logging.h"
 #include "common/scm_rev.h"
 #include "video_core/renderer_null/renderer_null.h"
@@ -30,7 +31,7 @@ EmuWindow_SDL3_Null::EmuWindow_SDL3_Null(InputCommon::InputSubsystem* input_subs
         std::format("Eden {} | {}-{} (Vulkan)", std::string_view{Common::g_build_name},
                     std::string_view{Common::g_scm_branch}, std::string_view{Common::g_scm_desc});
     render_window =
-        SDL_CreateWindow(window_title.c_str(), Layout::ScreenUndocked::Width,
+        SDL_CreateWindow((Arcadia::WindowTitle().empty() ? window_title : Arcadia::WindowTitle()).c_str(), Layout::ScreenUndocked::Width,
                          Layout::ScreenUndocked::Height,
                          SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
 

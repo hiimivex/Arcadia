@@ -8,33 +8,35 @@ jobs:
   windows:
     runs-on: windows-2022
     timeout-minutes: 300
+    defaults:
+      run:
+        shell: msys2 {0}
     steps:
       - uses: actions/checkout@v4
-      - name: Vulkan SDK
-        shell: pwsh
-        run: ./tools/windows/install-vulkan-sdk.ps1
-      - uses: ilammy/msvc-dev-cmd@v1
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: git make autoconf libtool automake-wrapper jq patch
+          pacboy: >-
+            cmake:p ninja:p toolchain:p clang:p python-pip:p openssl:p vulkan-memory-allocator:p vulkan-devel:p
+            glslang:p boost:p lz4:p zlib:p zstd:p enet:p opus:p libusb:p SDL3:p ffmpeg:p ntldd:p
       - name: Configurer
-        shell: pwsh
         run: |
-          $env:VULKAN_SDK = "C:/VulkanSDK/1.4.341.1"
-          $env:PATH = "$env:VULKAN_SDK/Bin;$env:PATH"
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release `
-            -DENABLE_QT=OFF -DYUZU_CMD=ON -DYUZU_ROOM=OFF -DYUZU_ROOM_STANDALONE=OFF -DYUZU_TESTS=OFF `
-            -DENABLE_WEB_SERVICE=OFF -DENABLE_UPDATE_CHECKER=OFF -DUSE_DISCORD_PRESENCE=OFF -DENABLE_WERROR=OFF `
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+            -DENABLE_QT=OFF -DYUZU_CMD=ON -DYUZU_ROOM=OFF -DYUZU_ROOM_STANDALONE=OFF -DYUZU_TESTS=OFF \
+            -DENABLE_WEB_SERVICE=OFF -DENABLE_UPDATE_CHECKER=OFF -DUSE_DISCORD_PRESENCE=OFF -DENABLE_WERROR=OFF \
             -DYUZU_CRASH_DUMPS=OFF -DENABLE_LIBUSB=OFF
       - name: Compiler
-        shell: pwsh
-        run: |
-          $env:VULKAN_SDK = "C:/VulkanSDK/1.4.341.1"
-          $env:PATH = "$env:VULKAN_SDK/Bin;$env:PATH"
-          cmake --build build --target yuzu-cmd
+        run: cmake --build build --target yuzu-cmd
       - name: Rassembler
-        shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force out | Out-Null
-          Get-ChildItem build/bin -Recurse -Include *.exe,*.dll | Copy-Item -Destination out
-          Get-ChildItem out
+          mkdir -p out
+          exe=$(find build -name 'arcadia-switch.exe' -o -name 'eden-cli.exe' | head -1)
+          echo "exe: $exe"
+          cp "$exe" out/
+          ntldd -R "$exe" | grep -i 'ucrt64' | sed -E 's/.*=> *([^ ]+).*/\1/' | tr '\\' '/' | while read -r d; do cp "$(cygpath -u "$d")" out/ || true; done
+          ls -la out
       - uses: actions/upload-artifact@v4
         with:
           name: arcadia-switch-windows

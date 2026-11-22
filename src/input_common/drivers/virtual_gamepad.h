@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <functional>
+
 #include "input_common/input_engine.h"
 
 namespace InputCommon {
@@ -74,6 +76,14 @@ public:
 
     /// Restores all inputs into the neutral position
     void ResetControllers();
+
+    /// Arcadia : vibrations demandées par le jeu, renvoyées vers la vraie manette du lanceur
+    using VibrationCallback = std::function<void(std::size_t port, const Common::Input::VibrationStatus&)>;
+    static void SetVibrationCallback(VibrationCallback callback);
+
+    Common::Input::DriverResult SetVibration(
+        const PadIdentifier& identifier, const Common::Input::VibrationStatus& vibration) override;
+    bool IsVibrationEnabled(const PadIdentifier& identifier) override;
 
 private:
     /// Returns the correct identifier corresponding to the player index
