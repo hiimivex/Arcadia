@@ -31,7 +31,7 @@ float g_low[2]{}, g_high[2]{};
 Uint64 g_vib_at[2]{};
 
 const char* Env(const char* name) {
-    const char* v = std::getenv(name);
+    const char* v = SDL_getenv(name); // UTF-8 (accents dans les chemins et les titres)
     return v && *v ? v : nullptr;
 }
 

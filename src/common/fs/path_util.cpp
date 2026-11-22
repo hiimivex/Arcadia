@@ -117,6 +117,10 @@ public:
         if (!Exists(eden_path) || !IsDir(eden_path)) {
             eden_path = GetAppDataRoamingDirectory() / EDEN_DIR;
         }
+        // Arcadia : dossier de données choisi par le lanceur (clés, firmware, sauvegardes)
+        if (const wchar_t* arcadia_dir = _wgetenv(L"ARCADIA_USER_DIR"); arcadia_dir && *arcadia_dir) {
+            eden_path = fs::path{std::wstring{arcadia_dir}};
+        }
         eden_path_cache = eden_path / CACHE_DIR;
         eden_path_config = eden_path / CONFIG_DIR;
 #define LEGACY_PATH(titleName, upperName) GenerateLegacyPath(EmuPath::titleName##Dir, GetAppDataRoamingDirectory() / upperName##_DIR); \
@@ -133,6 +137,9 @@ public:
         eden_path_config = eden_path / CONFIG_DIR;
 #else
         eden_path = GetCurrentDir() / PORTABLE_DIR;
+        if (const char* arcadia_dir = getenv("ARCADIA_USER_DIR"); arcadia_dir && *arcadia_dir) {
+            eden_path = fs::path{arcadia_dir}; // Arcadia : dossier de données choisi par le lanceur
+        }
         if (!Exists(eden_path) || !IsDir(eden_path)) {
             eden_path = GetDataDirectory("XDG_DATA_HOME") / EDEN_DIR;
             eden_path_cache = GetDataDirectory("XDG_CACHE_HOME") / EDEN_DIR;
