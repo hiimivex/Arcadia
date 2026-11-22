@@ -1,0 +1,31 @@
+ARCADIA — MOTEUR INTÉGRÉ (arcadia-runner)
+=========================================
+
+arcadia-runner fait tourner des cœurs d'émulation libretro dans Arcadia, sans
+fenêtre d'émulateur. Licence : GPL-3.0 (comme Arcadia).
+
+Composants inclus
+-----------------
+- PPSSPP (cœur PSP, cores/ppsspp_libretro.dll, dossier system/PPSSPP)
+  © Henrik Rydgård et les contributeurs de PPSSPP — GPL-2.0 ou ultérieure
+  Sources : https://github.com/hrydgard/ppsspp (version 1.19.3)
+- Azahar (cœur 3DS, cores/azahar_libretro.dll, version 2126.2 officielle)
+  © les contributeurs d'Azahar et de Citra — GPL-2.0 ou ultérieure
+  Sources : https://github.com/azahar-emu/azahar
+- melonDS (cœur DS) © Arisotura et les contributeurs de melonDS — GPL-3.0 — https://github.com/melonDS-emu/melonDS
+- PCSX ReARMed (cœur PS1, BIOS libre intégré) — GPL-2.0 — https://github.com/libretro/pcsx_rearmed
+- Mesen (cœur NES) © Sour — GPL-3.0 — https://github.com/libretro/Mesen
+- bsnes (cœur Super Nintendo) © byuu et contributeurs — GPL-3.0 — https://github.com/libretro/bsnes
+- mGBA (cœur Game Boy / Color / Advance) © Jeffrey Pfau — MPL-2.0 — https://github.com/mgba-emu/mgba
+- FFmpeg (décodage vidéo/audio, intégré au cœur PPSSPP) — LGPL-2.1 ou ultérieure
+  Sources : https://github.com/hrydgard/ppsspp-ffmpeg
+- SDL 3 (fenêtre, son, manettes) — licence zlib — https://github.com/libsdl-org/SDL
+- Dear ImGui (menu en jeu) — licence MIT — https://github.com/ocornut/imgui
+- stb_image / stb_image_write — domaine public / MIT — https://github.com/nothings/stb
+- libwinpthread (MinGW-w64) — licence MIT/ZPL
+
+Arcadia peut aussi piloter des émulateurs installés à côté (Eden, Azahar, PCSX2,
+Dolphin, Cemu, RPCS3, Vita3K…) : ils restent la propriété de leurs auteurs et
+sous leurs propres licences ; Arcadia n'en modifie jamais les fichiers d'origine.
+
+Arcadia ne fournit aucun jeu, BIOS, clé ni firmware.

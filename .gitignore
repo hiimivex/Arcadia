@@ -1,0 +1,54 @@
+# Dépendances et builds
+node_modules/
+dist/
+native/deps/
+native/runner/build-*/
+*.exe
+*.dll
+*.so
+*.dylib
+runner/cores/
+runner/system/
+
+# JAMAIS de contenu protégé dans ce dépôt
+*.nds
+*.3ds
+*.cci
+*.cia
+*.cxi
+*.iso
+*.cso
+*.pbp
+*.xci
+*.nsp
+*.nsz
+*.xcz
+*.nca
+*.gba
+*.gbc
+*.gb
+*.nes
+*.sfc
+*.smc
+*.chd
+*.bin
+*.cue
+*.pkg
+*.rvz
+*.wbfs
+*.keys
+prod.keys
+title.keys
+key_retail.bin
+firmware/
+bios/
+*.bios
+saves/
+*.sav
+*.state*
+
+# Divers
+.DS_Store
+Thumbs.db
+*.log
+GUIDE ARCADIA.txt

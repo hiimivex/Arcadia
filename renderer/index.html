@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' media: data:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+  <title>Arcadia</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Barre du haut -->
+  <header class="topbar">
+    <div class="brand" id="brand"><img class="brand-logo" src="logo-128.png" alt=""><span class="brand-word"></span></div>
+    <nav class="tabs">
+      <button class="tab active" data-view="home">BIBLIOTHÈQUE</button>
+      <button class="tab" data-view="stats">STATISTIQUES</button>
+    </nav>
+    <div class="top-actions">
+      <button id="btn-add" class="top-btn" title="Ajouter des ROM (ou glisse-les dans la fenêtre)">＋ Ajouter des jeux</button>
+      <button id="btn-emus" class="top-btn" title="Paramètres (Ctrl+,)">⚙ Paramètres</button>
+      <button id="btn-bp" class="top-btn" title="BigPicture : plein écran, navigation à la manette">BigPicture</button>
+      <button id="btn-full" class="top-btn icon" title="Plein écran (F11)">⛶</button>
+      <button id="btn-folder" class="top-btn icon" title="Ouvrir le dossier de la bibliothèque">📁</button>
+    </div>
+  </header>
+
+  <!-- Accueil sans bibliothèque -->
+  <section id="welcome" class="welcome hidden">
+    <div class="welcome-card">
+      <div class="welcome-logo">ARCADIA</div>
+      <h2 class="welcome-q">As-tu déjà un dossier de jeux ?</h2>
+      <p>Arcadia y range un dossier par console (SWITCH, 3DS, DS, PSP…), affiche tes jeux avec leurs icônes et jaquettes, et lance le bon émulateur. Tes fichiers ne sont jamais supprimés.</p>
+      <div class="welcome-actions">
+        <button id="btn-choose-first" class="btn-white">Oui, choisir mon dossier</button>
+        <button id="btn-create-lib" class="btn-ghost">Non, en créer un</button>
+      </div>
+    </div>
+  </section>
+
+  <div id="app" class="layout hidden">
+    <!-- Colonne de gauche façon Steam -->
+    <aside class="sidebar">
+      <button id="nav-home" class="side-home active"><span class="home-ico">⌂</span> ACCUEIL</button>
+      <div class="side-filters">
+        <div class="search-wrap">
+          <span class="search-ico">⌕</span>
+          <input id="search" type="search" placeholder="Rechercher" autocomplete="off" spellcheck="false">
+        </div>
+        <select id="console-filter" title="Filtrer par console"><option value="">Toutes</option></select>
+      </div>
+      <div id="side-list" class="side-list"></div>
+      <button id="btn-new-cat" class="side-newcat">＋ Nouvelle catégorie</button>
+    </aside>
+
+    <!-- Zone principale -->
+    <main id="main" class="main">
+      <section id="view-home" class="view">
+        <div id="banner-health" class="banner hidden">
+          <div class="b-ico">!</div>
+          <div class="b-text" id="health-text"></div>
+          <button id="health-see" class="btn-white">Voir</button>
+        </div>
+        <div id="banner" class="banner hidden">
+          <div class="b-ico">!</div>
+          <div class="b-text"><b id="banner-n"></b> en vrac dans ta bibliothèque, hors des dossiers de console.</div>
+          <button id="banner-sort" class="btn-white">Trier automatiquement</button>
+        </div>
+        <div id="shelf-recent" class="shelf">
+          <div class="shelf-head"><h2>Joués récemment</h2></div>
+          <div id="recent-row" class="recent-row"></div>
+        </div>
+        <div class="shelf">
+          <div class="shelf-head">
+            <h2 id="grid-title">Tous les jeux</h2><span id="grid-count" class="muted"></span>
+            <div class="shelf-tools">
+              <label class="muted small">Trier par</label>
+              <select id="sort">
+                <option value="title">Nom</option>
+                <option value="recent">Dernière partie</option>
+                <option value="playtime">Heures jouées</option>
+                <option value="added">Date d'ajout</option>
+                <option value="console">Console</option>
+              </select>
+              <div class="seg" id="view-seg"><button data-v="grid" title="Grille">▦</button><button data-v="list" title="Liste">☰</button></div>
+              <input id="zoom" type="range" min="130" max="260" value="180" title="Taille des jaquettes">
+            </div>
+          </div>
+          <div id="grid" class="grid"></div>
+          <div id="empty" class="empty hidden"></div>
+        </div>
+      </section>
+
+      <section id="view-stats" class="view hidden"></section>
+
+      <section id="view-game" class="view hidden">
+        <div class="hero">
+          <div id="hero-bg" class="hero-bg"></div>
+          <div class="hero-content">
+            <div id="hero-art" class="hero-art"></div>
+            <div class="hero-text">
+              <div id="hero-console" class="console-pill"></div>
+              <h1 id="hero-title"></h1>
+              <div id="hero-inner" class="muted small"></div>
+            </div>
+          </div>
+        </div>
+        <div class="actionbar">
+          <button id="g-play" class="btn-play"><span class="play-ico">▶</span><span id="g-play-label">JOUER</span></button>
+          <div class="stat"><div class="stat-label">TEMPS DE JEU</div><div id="g-time" class="stat-val">—</div></div>
+          <div class="stat"><div class="stat-label">DERNIÈRE SESSION</div><div id="g-last" class="stat-val">—</div></div>
+          <div class="stat"><div class="stat-label">LANCEMENTS</div><div id="g-plays" class="stat-val">0</div></div>
+          <div class="spacer"></div>
+          <button id="g-fav" class="btn-icon" title="Favori">☆</button>
+          <button id="g-more" class="btn-icon" title="Plus d'options">⋯</button>
+        </div>
+        <div id="g-warning" class="warning hidden"></div>
+        <div id="g-about" class="about hidden">
+          <div class="about-text">
+            <h3>À PROPOS</h3>
+            <div id="g-meta-line" class="muted small"></div>
+            <div id="g-facts" class="facts"></div>
+            <p id="g-desc"></p>
+            <div id="g-source" class="source hidden"></div>
+          </div>
+          <div id="g-shots" class="shots"></div>
+        </div>
+        <div id="g-multi" class="panel wide multi hidden"></div>
+        <div id="g-updates" class="panel wide hidden"></div>
+        <div id="g-myshots" class="panel wide hidden"><h3>TES CAPTURES</h3><div class="shots mine"></div></div>
+        <div class="game-body">
+          <div class="panel">
+            <h3>SAUVEGARDES</h3>
+            <div id="g-saves"></div>
+          </div>
+          <div class="panel">
+            <h3>RÉGLAGES DE CE JEU</h3>
+            <div id="g-gset"></div>
+          </div>
+          <div class="panel">
+            <h3>CATÉGORIES</h3>
+            <div id="g-cats" class="chips"></div>
+          </div>
+          <div class="panel">
+            <h3>INFORMATIONS</h3>
+            <dl class="meta">
+              <dt>Émulateur</dt><dd id="g-emu"></dd>
+              <dt>Fichier</dt><dd id="g-file" class="mono"></dd>
+              <dt>Taille</dt><dd id="g-size"></dd>
+              <dt>Ajouté le</dt><dd id="g-added"></dd>
+            </dl>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Dépôt de fichiers -->
+  <div id="drop" class="drop hidden"><div class="drop-box"><div class="drop-ico">⤓</div><div>Dépose tes ROM ici</div><div class="muted small">Elles seront triées et rangées dans le dossier de leur console</div></div></div>
+
+  <!-- Progression d'import -->
+  <div id="import" class="import hidden">
+    <div class="import-head"><span id="imp-title">Importation…</span><button id="imp-close" class="x hidden">×</button></div>
+    <div id="imp-file" class="import-file"></div>
+    <div class="bar"><div id="imp-bar" class="bar-fill"></div></div>
+    <div id="imp-detail" class="import-detail"></div>
+  </div>
+
+  <!-- Menu contextuel -->
+  <div id="ctx" class="ctx hidden"></div>
+
+  <!-- Fenêtre modale générique -->
+  <div id="modal" class="modal hidden"><div id="modal-card" class="modal-card"></div></div>
+
+  <!-- BigPicture -->
+  <div id="bp" class="bp hidden">
+    <div id="bp-bg" class="bp-bg"></div><div class="bp-bg" id="bp-bg2"></div>
+    <div class="bp-top">
+      <div class="bp-brand" id="bp-brand"></div>
+      <nav id="bp-tabs" class="bp-tabs"></nav>
+      <div id="bp-clock" class="bp-clock"></div>
+    </div>
+    <div class="bp-stage">
+      <div id="bp-track" class="bp-track"></div>
+      <div class="bp-blur l"></div><div class="bp-blur r"></div>
+    </div>
+    <div class="bp-caption"><span id="bp-title"></span><span id="bp-sub"></span></div>
+    <div id="bp-tiles" class="bp-tiles"></div>
+    <div class="bp-hints"><span><b>LB</b><b>RB</b> Console</span><span><b>A</b> Jouer</span><span><b>Y</b> Favori</span><span><b>X</b> Détails</span><span><b>B</b> Quitter BigPicture</span></div>
+  </div>
+
+  <!-- Intro -->
+  <div id="intro" class="intro"></div>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="logo.js"></script>
+  <script src="intro.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

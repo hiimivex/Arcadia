@@ -1,0 +1,22 @@
+cmake_minimum_required(VERSION 3.20)
+project(arcadia_runner CXX C)
+set(CMAKE_CXX_STANDARD 17)
+set(DEPS ${CMAKE_SOURCE_DIR}/../deps)
+set(SDL_STATIC ON CACHE BOOL "" FORCE)
+set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
+set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
+add_subdirectory(${DEPS}/SDL3 sdl EXCLUDE_FROM_ALL)
+set(IMGUI ${DEPS}/imgui)
+add_executable(arcadia-runner WIN32
+  src/main.cpp src/core.cpp src/gl.cpp src/ui.cpp src/calib.cpp
+  ${IMGUI}/imgui.cpp ${IMGUI}/imgui_draw.cpp ${IMGUI}/imgui_tables.cpp ${IMGUI}/imgui_widgets.cpp
+  ${IMGUI}/backends/imgui_impl_sdl3.cpp ${IMGUI}/backends/imgui_impl_opengl3.cpp)
+target_include_directories(arcadia-runner PRIVATE src ${IMGUI} ${IMGUI}/backends ${DEPS}/stb)
+target_link_libraries(arcadia-runner PRIVATE SDL3::SDL3-static)
+if (WIN32)
+  target_link_options(arcadia-runner PRIVATE -static -static-libgcc -static-libstdc++)
+  if (EXISTS ${CMAKE_SOURCE_DIR}/res/runner.rc)
+    target_sources(arcadia-runner PRIVATE res/runner.rc)
+  endif()
+endif()

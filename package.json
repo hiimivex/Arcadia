@@ -1,0 +1,103 @@
+{
+  "name": "arcadia",
+  "productName": "Arcadia",
+  "version": "1.14.0",
+  "description": "Arcadia — bibliothèque de jeux façon Steam pour émulateurs",
+  "main": "main.js",
+  "license": "GPL-3.0-or-later",
+  "scripts": {
+    "start": "electron .",
+    "test": "node test/scan.test.js && node test/config.test.js && node test/switch.test.js && node test/saves.test.js && node test/presets.test.js && node test/extras.test.js && node test/gameinfo.test.js && node test/multiplayer.test.js",
+    "dist:win": "electron-builder --win nsis portable --x64"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "png-to-ico": "^3.0.2"
+  },
+  "build": {
+    "appId": "dev.arcadia.launcher",
+    "productName": "Arcadia",
+    "copyright": "Arcadia — GPL-3.0",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "overlay-preload.js",
+      "src/**",
+      "renderer/**",
+      "build/icon.png",
+      "build/icon.ico",
+      "package.json",
+      "!node_modules/7zip-bin/linux/**",
+      "!node_modules/7zip-bin/mac/**",
+      "!node_modules/7zip-bin/win/ia32/**",
+      "!node_modules/7zip-bin/win/arm64/**"
+    ],
+    "asarUnpack": [
+      "node_modules/7zip-bin/**"
+    ],
+    "afterPack": "build/afterPack.js",
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Arcadia",
+      "installerLanguages": [
+        "fr_FR"
+      ],
+      "language": "1036",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "artifactName": "Arcadia-Setup-${version}.exe"
+    },
+    "portable": {
+      "artifactName": "Arcadia-Portable-${version}.exe"
+    },
+    "extraResources": [
+      {
+        "from": "runner",
+        "to": "runner",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "electronLanguages": [
+      "fr",
+      "en-US"
+    ]
+  },
+  "dependencies": {
+    "7zip-bin": "^5.2.0",
+    "node-unrar-js": "^2.0.2",
+    "resedit": "^3.1.1"
+  },
+  "author": {
+    "name": "Ivex"
+  }
+}

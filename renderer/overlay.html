@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+<title>Arcadia</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: transparent; color: #fff; overflow: hidden; user-select: none;
+    font-family: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  .veil { position: fixed; inset: 0; background: linear-gradient(90deg, rgba(0,0,0,.9) 0%, rgba(0,0,0,.66) 40%, rgba(0,0,0,.76) 100%); opacity: 0; transition: opacity .25s; }
+  body.on .veil { opacity: 1; }
+  .wrap { position: fixed; inset: 0; padding: 6.5vh 4.2vw; display: flex; flex-direction: column; opacity: 0; transform: translateX(-24px); transition: .3s cubic-bezier(.2,.8,.2,1); }
+  body.on .wrap { opacity: 1; transform: none; }
+  .head { display: flex; justify-content: space-between; align-items: flex-start; }
+  h1 { margin: 0; font-size: clamp(28px, 2.6vw, 50px); font-weight: 800; letter-spacing: .2px; }
+  .pill { display: inline-block; margin-top: 12px; padding: 7px 14px; border-radius: 999px; background: rgba(255,255,255,.1); font-weight: 700; font-size: 14px; }
+  .clock { text-align: right; } .clock b { font-size: 30px; display: block; } .clock span { opacity: .5; font-size: 16px; }
+  .body { flex: 1; display: flex; gap: 3vw; margin-top: 6vh; min-height: 0; }
+  .menu { width: min(380px, 26vw); display: flex; flex-direction: column; gap: 10px; flex: none; }
+  .item { display: flex; align-items: center; gap: 18px; height: 58px; padding: 0 24px; border-radius: 29px; border: 0; color: rgba(255,255,255,.82); background: rgba(255,255,255,.05);
+    font: inherit; font-size: 20px; cursor: pointer; transition: background .15s, color .15s, box-shadow .2s; text-align: left; outline: none; flex: none; }
+  .item .ico { width: 22px; opacity: .6; text-align: center; }
+  .item.cur { background: rgba(255,255,255,.13); color: #fff; }
+  .item.on { background: #f5f5f5; color: #0c0c0e; font-weight: 700; box-shadow: 0 0 0 1px rgba(255,255,255,.4), 0 0 40px rgba(255,255,255,.28); }
+  .item.on .ico { opacity: .8; }
+  .gap { height: 10px; flex: none; }
+  .panel { flex: 1; max-width: 1050px; border-radius: 34px; background: rgba(12,12,14,.72); border: 1px solid rgba(255,255,255,.09);
+    box-shadow: 0 0 60px rgba(255,255,255,.06), inset 0 60px 80px -60px rgba(255,255,255,.05); padding: 38px 42px; overflow-y: auto; display: flex; flex-direction: column; }
+  .panel::-webkit-scrollbar { width: 6px; } .panel::-webkit-scrollbar-thumb { background: rgba(255,255,255,.15); border-radius: 3px; }
+  .panel h2 { margin: 0; font-size: 30px; } .panel .sub { margin: 8px 0 24px; color: rgba(255,255,255,.55); font-size: 16px; line-height: 1.5; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 18px; min-height: 62px; padding: 12px 24px; border-radius: 22px; margin-bottom: 8px;
+    background: rgba(255,255,255,.04); cursor: pointer; transition: background .15s, box-shadow .2s; }
+  .row .l b { display: block; font-size: 18px; font-weight: 600; } .row .l small { display: block; margin-top: 3px; color: rgba(255,255,255,.5); font-size: 13.5px; }
+  .row .v { display: flex; align-items: center; gap: 14px; font-size: 17px; font-weight: 600; white-space: nowrap; }
+  .row .v i { font-style: normal; opacity: .45; font-size: 20px; }
+  .row.on { background: #f5f5f5; color: #0c0c0e; box-shadow: 0 0 0 1px rgba(255,255,255,.4), 0 0 36px rgba(255,255,255,.22); }
+  .row.on .l small { color: rgba(0,0,0,.55); } .row.on .v i { opacity: .6; }
+  .row.btn .v { font-size: 15px; opacity: .7; }
+  .info { padding: 14px 20px; border-radius: 18px; background: rgba(255,255,255,.06); color: rgba(255,255,255,.75); font-size: 15px; line-height: 1.5; margin-bottom: 16px; }
+  .info.warn { background: rgba(255,255,255,.92); color: #0c0c0e; font-weight: 600; }
+  .list { display: grid; gap: 6px; margin: 6px 0 18px; }
+  .li { display: flex; justify-content: space-between; padding: 10px 18px; border-radius: 14px; background: rgba(255,255,255,.035); font-size: 15px; color: rgba(255,255,255,.8); }
+  .li span:last-child { opacity: .5; }
+  .keys .li span:first-child b { display: inline-grid; place-items: center; min-width: 30px; height: 28px; padding: 0 10px; border-radius: 14px; background: #fff; color: #000; font-size: 13px; margin-right: 8px; }
+  .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin: 4px 0 10px; }
+  .tile { display: block; min-height: 0; padding: 0; margin: 0; border-radius: 20px; overflow: hidden; background: rgba(255,255,255,.05); }
+  .tile .img { aspect-ratio: 16/9; background: #0b0b0c center / cover; display: grid; place-items: center; color: rgba(255,255,255,.3); font-size: 26px; }
+  .tile .cap { padding: 10px 14px 12px; } .tile .cap b { display: block; font-size: 15px; } .tile .cap small { display: block; font-size: 12.5px; opacity: .55; margin-top: 2px; }
+  .tile.first .img { box-shadow: inset 0 0 0 2px rgba(255,255,255,.5); }
+  .row.tile.on { box-shadow: 0 0 0 2px #fff, 0 0 36px rgba(255,255,255,.3); }
+  .note { margin-top: 18px; max-width: 560px; color: rgba(255,255,255,.5); font-size: 14.5px; line-height: 1.5; flex: none; }
+  .hints { position: fixed; right: 4.2vw; bottom: 4.2vh; display: flex; gap: 26px; font-size: 15px; opacity: 0; transition: opacity .25s; }
+  body.on .hints { opacity: .85; }
+  .hints b { display: inline-grid; place-items: center; min-width: 28px; height: 28px; padding: 0 8px; margin-right: 8px; border-radius: 14px; background: #fff; color: #000; font-size: 13px; }
+  .confirm { position: fixed; inset: 0; display: none; place-items: center; background: rgba(0,0,0,.5); }
+  .confirm.show { display: grid; }
+  .card { width: 640px; padding: 36px 40px; border-radius: 30px; background: rgba(14,14,16,.94); border: 1px solid rgba(255,255,255,.09); box-shadow: 0 0 60px rgba(255,255,255,.08); }
+  .card h2 { margin: 0 0 10px; font-size: 30px; } .card p { margin: 0 0 26px; color: rgba(255,255,255,.65); font-size: 18px; line-height: 1.5; }
+  .crow { display: flex; gap: 16px; } .crow .item { flex: 1; justify-content: center; }
+  .banner { position: fixed; left: 36px; bottom: 40px; padding: 18px 28px; border-radius: 26px; background: rgba(12,12,14,.88); border: 1px solid rgba(255,255,255,.14);
+    opacity: 0; transform: translateY(12px); transition: .35s; pointer-events: none; }
+  .banner.show { opacity: 1; transform: none; }
+  .banner b { display: block; font-size: 19px; } .banner span { display: block; margin-top: 6px; color: rgba(255,255,255,.65); font-size: 15.5px; }
+  .toast { position: fixed; left: 50%; bottom: 11vh; transform: translateX(-50%) translateY(10px); padding: 14px 28px; border-radius: 26px; background: rgba(12,12,14,.92);
+    border: 1px solid rgba(255,255,255,.14); box-shadow: 0 0 30px rgba(255,255,255,.1); font-weight: 700; font-size: 17px; opacity: 0; transition: .25s; pointer-events: none; }
+  .toast.show { opacity: 1; transform: translateX(-50%); }
+</style></head>
+<body>
+  <div class="veil"></div>
+  <div class="wrap">
+    <div class="head">
+      <div><h1 id="title">Jeu</h1><span class="pill" id="sub">En pause</span></div>
+      <div class="clock"><b id="clock">--:--</b><span id="session"></span></div>
+    </div>
+    <div class="body">
+      <div class="menu" id="menu"></div>
+      <div class="panel" id="panel"></div>
+    </div>
+    <div class="note" id="note"></div>
+  </div>
+  <div class="hints" id="hints"></div>
+  <div class="confirm" id="confirm"><div class="card">
+    <h2 id="c-title">Quitter le jeu ?</h2><p id="c-text"></p>
+    <div class="crow"><button class="item" data-c="yes" id="c-yes">Quitter</button><button class="item" data-c="no">Annuler</button></div>
+  </div></div>
+  <div class="toast" id="toast"></div>
+  <div class="banner" id="banner"><b id="b1"></b><span id="b2"></span></div>
+<script>
+  const $ = s => document.querySelector(s);
+  const el = (t, c, txt) => { const e = document.createElement(t); if (c) e.className = c; if (txt != null) e.textContent = txt; return e; };
+  let mouseLive = false; // le survol ne compte que si la souris a vraiment bougé (pas quand le panneau défile dessous)
+  document.addEventListener('mousemove', e => { if (e.movementX || e.movementY) mouseLive = true; });
+  let D = null, open = false, t0 = 0, sec = 0, focus = 'menu', row = 0, confirm = null, cidx = 1, navSeen = false;
+  const SECS = [
+    { id: 'resume', ico: '▶', label: 'Reprendre', act: true },
+    { id: 'saves', ico: '◆', label: 'Sauvegardes' },
+    { id: 'image', ico: '◐', label: 'Image', sw: true },
+    { id: 'son', ico: '♪', label: 'Son', sw: true },
+    { id: 'langue', ico: '◎', label: 'Langue', sw: true },
+    { id: 'pad', ico: '✦', label: 'Manette' },
+    { id: 'keys', ico: '⌨', label: 'Raccourcis' },
+    { id: 'gap' },
+    { id: 'restart', ico: '↻', label: 'Relancer le jeu', act: true },
+    { id: 'quit', ico: '✕', label: 'Quitter le jeu', act: true }
+  ];
+  const secs = () => SECS.filter(s => !s.sw || (D && D.kind === 'switch'));
+  const items = () => secs().filter(s => s.id !== 'gap');
+  function toast(t) { if (!t) return; const e = $('#toast'); e.textContent = t; e.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => e.classList.remove('show'), 2600); }
+  function rows() { return [...document.querySelectorAll('#panel .row')]; }
+
+  function paintMenu() {
+    const m = $('#menu'); m.replaceChildren();
+    const its = items();
+    for (const s of secs()) {
+      if (s.id === 'gap') { m.append(el('div', 'gap')); continue; }
+      const i = its.indexOf(s);
+      const b = el('button', 'item' + (i === sec ? (focus === 'menu' ? ' on' : ' cur') : ''));
+      b.append(el('span', 'ico', s.ico), document.createTextNode(s.label));
+      b.onclick = () => { sec = i; focus = 'menu'; choose(); };
+      b.onmouseenter = () => { if (!mouseLive) return; if (sec !== i || focus !== 'menu') { const ch = sec !== i; sec = i; focus = 'menu'; if (ch) paint(); else paintSel(); } };
+      m.append(b);
+    }
+  }
+  function optRow(o) {
+    const r = el('div', 'row');
+    const l = el('div', 'l'); l.append(el('b', '', o.label)); if (o.hint) l.append(el('small', '', o.hint));
+    const cur = o.values.find(v => v[0] === o.value);
+    const v = el('div', 'v'); v.append(el('i', '', '‹'), el('span', '', cur ? cur[1] : 'Personnalisé'), el('i', '', '›'));
+    r.append(l, v); r.dataset.opt = o.key;
+    r.onclick = () => cycle(o.key, 1);
+    return r;
+  }
+  function btnRow(label, sub, what, right) {
+    const r = el('div', 'row btn');
+    const l = el('div', 'l'); l.append(el('b', '', label)); if (sub) l.append(el('small', '', sub));
+    r.append(l, el('div', 'v', right || '↵')); r.dataset.run = what; r.onclick = () => runAct(what);
+    return r;
+  }
+  function paintPanel() {
+    const p = $('#panel'); p.replaceChildren();
+    const s = items()[sec] || items()[0];
+    const head = (t, sub) => { p.append(el('h2', '', t)); if (sub) p.append(el('div', 'sub', sub)); };
+    const pending = () => { if (D.pending) { p.append(el('div', 'info warn', 'Changements enregistrés : ils s\'appliquent au prochain lancement du jeu.')); p.append(btnRow('Relancer le jeu maintenant', 'Ce que tu n\'as pas sauvegardé dans le jeu sera perdu', 'restart')); } };
+    if (s.id === 'resume') { head('Reprendre', 'Retourne dans le jeu là où tu l\'as laissé.'); p.append(btnRow('Reprendre la partie', null, 'resume')); }
+    else if (s.id === 'saves') {
+      head('Sauvegardes', D.kind === 'switch' ? 'Les jeux Switch sauvegardent eux-mêmes. Arcadia met ensuite une copie de ta sauvegarde à l\'abri, restaurable depuis la page du jeu.' : 'Arcadia garde une copie de tes sauvegardes, restaurable depuis la page du jeu.');
+      p.append(btnRow('Copier ma sauvegarde maintenant', 'Prends d\'abord soin de sauvegarder dans le jeu', 'backup'));
+      p.append(btnRow('Ouvrir le dossier des sauvegardes', null, 'openSaves'));
+      const sv = D.saves || { items: [] };
+      if (sv.items.length) {
+        p.append(el('div', 'sub', `${sv.count} copie(s) · choisis-en une pour relancer le jeu dessus`));
+        const grid = el('div', 'tiles');
+        sv.items.forEach((b, i) => {
+          const t = el('div', 'row tile' + (i === 0 ? ' first' : ''));
+          const im = el('div', 'img'); if (b.thumb) im.style.backgroundImage = `url("${b.thumb}")`; else im.textContent = '◆';
+          const cap = el('div', 'cap'); cap.append(el('b', '', new Date(b.iso).toLocaleString('fr-FR', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })), el('small', '', i === 0 ? 'La plus récente' + (b.machine ? ' · ' + b.machine : '') : (b.machine || '')));
+          t.append(im, cap); t.dataset.run = 'load:' + i; t.dataset.tile = i; t.onclick = () => runAct('load:' + i);
+          grid.append(t);
+        });
+        p.append(grid);
+      } else p.append(el('div', 'info', 'Aucune copie pour l\'instant : sauvegarde dans le jeu, puis « Copier ma sauvegarde maintenant ».'));
+    }
+    else if (s.id === 'image' || s.id === 'son' || s.id === 'langue') {
+      head(({ image: 'Image', son: 'Son', langue: 'Langue' })[s.id], ({ image: 'Qualité, fluidité et format du jeu. ◀ ▶ pour changer une valeur.', son: 'Volume du jeu.', langue: 'Uniquement les langues que ce jeu propose. ◀ ▶ pour changer.' })[s.id]);
+      pending();
+      const os = (D.opts || []).filter(o => o.sec === s.id);
+      for (const o of os) p.append(optRow(o));
+      if (!os.length) p.append(el('div', 'info', s.id === 'langue' ? 'Ce jeu n\'indique pas ses langues : il suit la langue de la console (Paramètres d\'Arcadia → émulateur Switch).' : 'Rien à régler ici pour ce jeu.'));
+    }
+    else if (s.id === 'pad') {
+      head('Manette', D.dsu ? 'La manette et le clavier marchent en même temps : utilise celui que tu veux, quand tu veux.' : 'La même configuration sert dans tous les jeux et tous les moteurs.');
+      const i = el('div', 'info'); i.textContent = `Manette : ${D.pad.name}${D.dsu ? '  ·  Clavier : actif' : ''}`; p.append(i);
+      pending();
+      for (const o of (D.opts || []).filter(o => o.sec === 'manette')) p.append(optRow(o));
+      p.append(btnRow('Recalibrer ma manette', 'Appuie sur A, ou règle chaque touche une par une', 'calibrate'));
+    }
+    else if (s.id === 'keys') {
+      head('Raccourcis', 'Disponibles pendant toute la partie.');
+      const l = el('div', 'list keys');
+      for (const [k, what] of D.shortcuts || []) { const li = el('div', 'li'); const a = el('span'); a.append(el('b', '', k)); li.append(a, el('span', '', what)); l.append(li); }
+      p.append(l);
+      if (D.dsu) {
+        p.append(el('div', 'sub', 'Clavier (en même temps que la manette)'));
+        const kl = el('div', 'list keys'); p.append(kl);
+        const KB = [[['KeyW', 'KeyA', 'KeyS', 'KeyD'], 'Stick gauche'], [['KeyT', 'KeyF', 'KeyG', 'KeyH'], 'Stick droit'], [['↑ ↓ ← →'], 'Croix'],
+          [['KeyL'], 'A'], [['KeyK'], 'B'], [['KeyI'], 'X'], [['KeyJ'], 'Y'], [['KeyQ', 'KeyE'], 'L / R'], [['Digit1', 'Digit3'], 'ZL / ZR'],
+          [['Entrée'], '+'], [['Retour arrière'], '−'], [['Maj gauche', 'KeyB'], 'Clic stick gauche / droit'], [['Origine'], 'HOME']];
+        (navigator.keyboard && navigator.keyboard.getLayoutMap ? navigator.keyboard.getLayoutMap() : Promise.resolve(null)).catch(() => null).then(m => {
+          for (const [codes, what] of KB) {
+            const li = el('div', 'li'), a = el('span');
+            a.append(el('b', '', codes.map(c => (m && m.get(c) ? m.get(c).toUpperCase() : c.replace(/^Key|^Digit/, ''))).join(' ')));
+            li.append(a, el('span', '', what)); kl.append(li);
+          }
+        });
+      }
+    }
+    else if (s.id === 'restart') { head('Relancer le jeu', 'Ferme puis relance le jeu, avec les derniers réglages.'); p.append(btnRow('Relancer maintenant', 'Ce que tu n\'as pas sauvegardé dans le jeu sera perdu', 'restart')); }
+    else if (s.id === 'quit') { head('Quitter le jeu', 'Tu reviens dans Arcadia.'); p.append(btnRow('Quitter maintenant', D.kind === 'switch' ? 'Sauvegarde dans le jeu avant de quitter' : null, 'quit')); }
+    const rs = rows(); if (row >= rs.length) row = Math.max(0, rs.length - 1);
+    rs.forEach((r, i) => { r.classList.toggle('on', focus === 'panel' && i === row); r.onmouseenter = () => { if (!mouseLive) return; focus = 'panel'; row = i; paintSel(); }; });
+  }
+  function paintSel() {
+    document.querySelectorAll('#menu .item').forEach((b, i) => { b.classList.toggle('on', i === sec && focus === 'menu'); b.classList.toggle('cur', i === sec && focus !== 'menu'); });
+    rows().forEach((r, i) => r.classList.toggle('on', focus === 'panel' && i === row));
+    const on = rows()[row]; if (focus === 'panel' && on) on.scrollIntoView({ block: 'nearest' });
+    const h = $('#hints'); h.replaceChildren();
+    const hint = (k, t) => { const s = el('span'); s.append(el('b', '', k), document.createTextNode(t)); h.append(s); };
+    if (confirm) { hint('A', 'Valider'); hint('B', 'Annuler'); }
+    else if (focus === 'panel') { hint('◀ ▶', 'Changer'); hint('A', 'Valider'); hint('B', 'Retour'); }
+    else { hint('A', 'Valider'); hint('B', 'Reprendre'); hint('Échap', 'Reprendre'); }
+  }
+  function paint() { paintMenu(); paintPanel(); paintSel(); }
+
+  async function cycle(key, d) {
+    const o = (D.opts || []).find(x => x.key === key); if (!o) return;
+    let i = o.values.findIndex(v => v[0] === o.value); i = i < 0 ? 0 : (i + d + o.values.length) % o.values.length;
+    D = { ...(await window.ov.set(key, o.values[i][0])), _keep: true };
+    paintPanel(); paintSel();
+  }
+  async function runAct(what) {
+    if (what === 'resume') return close('resume');
+    if (what === 'quit' || what === 'restart' || what.startsWith('load:')) return ask(what);
+    const r = await window.ov.run(what);
+    if (r) { const t = r.toast; D = r; paintPanel(); paintSel(); toast(t); }
+  }
+  function ask(what) {
+    confirm = what; cidx = 1;
+    const load = what.startsWith('load:');
+    $('#c-title').textContent = load ? 'Reprendre depuis cette copie ?' : what === 'quit' ? 'Quitter le jeu ?' : 'Relancer le jeu ?';
+    $('#c-text').textContent = load ? 'Le jeu se ferme puis repart sur cette sauvegarde. Ta sauvegarde actuelle est copiée avant, par sécurité.' : D.kind === 'switch' ? 'Pense à sauvegarder dans le jeu avant : les jeux Switch gèrent leurs propres sauvegardes.' : 'Ce qui n\'est pas sauvegardé sera perdu.';
+    $('#c-yes').textContent = load ? 'Reprendre' : what === 'quit' ? 'Quitter' : 'Relancer';
+    $('#confirm').classList.add('show'); paintConfirm(); paintSel();
+  }
+  function paintConfirm() { document.querySelectorAll('[data-c]').forEach((b, i) => b.classList.toggle('on', i === cidx)); }
+  function close(a) { if (!open) return; open = false; document.body.classList.remove('on'); setTimeout(() => window.ov.act(a), 120); }
+  function choose() {
+    const s = items()[sec];
+    if (s.act) return runAct(s.id === 'restart' ? 'restart' : s.id);
+    focus = 'panel'; row = 0; paintSel();
+  }
+  function nav(k) {
+    if (!open || Date.now() - t0 < 250) return;
+    mouseLive = false;
+    if (confirm) {
+      if (k === 'left' || k === 'right' || k === 'up' || k === 'down') { cidx = 1 - cidx; paintConfirm(); }
+      else if (k === 'a') { const what = confirm, yes = cidx === 0; confirm = null; $('#confirm').classList.remove('show'); if (yes) { if (what.startsWith('load:')) { open = false; document.body.classList.remove('on'); window.ov.run(what); } else close(what); } else paintSel(); }
+      else if (k === 'b' || k === 'menu') { confirm = null; $('#confirm').classList.remove('show'); paintSel(); }
+      return;
+    }
+    const n = items().length;
+    if (k === 'lb' || k === 'rb') { sec = (sec + (k === 'rb' ? 1 : n - 1)) % n; focus = 'menu'; paint(); return; }
+    if (focus === 'menu') {
+      if (k === 'down' || k === 'up') { sec = (sec + (k === 'down' ? 1 : n - 1)) % n; paint(); }
+      else if (k === 'a' || k === 'right') { if (k === 'right' && items()[sec].act) return; choose(); }
+      else if (k === 'b' || k === 'menu') close('resume');
+      return;
+    }
+    const rs = rows(), r = rs[row];
+    if (r && r.dataset.tile !== undefined && (k === 'left' || k === 'right' || k === 'up' || k === 'down')) { // mosaïque : 3 colonnes
+      const ti = +r.dataset.tile, first = row - ti, nt = rs.length - first;
+      if (k === 'left' && ti % 3 === 0) { focus = 'menu'; paintSel(); return; }
+      let nx = ti + ({ left: -1, right: 1, up: -3, down: 3 })[k];
+      if (nx < 0) { row = first - 1 >= 0 ? first - 1 : row; paintSel(); return; }
+      if (nx >= nt) nx = k === 'down' ? nt - 1 : ti;
+      row = first + nx; paintSel(); return;
+    }
+    if (k === 'down' || k === 'up') { if (rs.length) row = (row + (k === 'down' ? 1 : rs.length - 1)) % rs.length; paintSel(); }
+    else if ((k === 'left' || k === 'right') && r && r.dataset.opt) cycle(r.dataset.opt, k === 'right' ? 1 : -1);
+    else if (k === 'left' || k === 'b' || k === 'menu') { focus = 'menu'; paintSel(); }
+    else if (k === 'a' && r) { if (r.dataset.opt) cycle(r.dataset.opt, 1); else if (r.dataset.run) runAct(r.dataset.run); }
+  }
+  window.ov.onNav(k => { navSeen = true; nav(k); });
+  document.addEventListener('click', e => { const b = e.target.closest('[data-c]'); if (!b) return; cidx = b.dataset.c === 'yes' ? 0 : 1; nav('a'); });
+  document.addEventListener('keydown', e => {
+    const k = { ArrowDown: 'down', ArrowUp: 'up', ArrowLeft: 'left', ArrowRight: 'right', Enter: 'a', ' ': 'a', Escape: 'menu', Backspace: 'b' }[e.key];
+    if (k) { e.preventDefault(); nav(k); }
+  });
+  // Secours si la navigation n'arrive pas par Arcadia (autre système que Windows) : API Gamepad
+  let prev = {};
+  function poll() {
+    if (open && !navSeen && document.hasFocus()) {
+      for (const p of (navigator.getGamepads ? [...navigator.getGamepads()].filter(Boolean) : [])) {
+        const pr = i => p.buttons[i] && p.buttons[i].pressed, ay = p.axes[1] || 0, ax = p.axes[0] || 0;
+        const st = { a: pr(0), b: pr(1), up: pr(12) || ay < -.6, down: pr(13) || ay > .6, left: pr(14) || ax < -.6, right: pr(15) || ax > .6, lb: pr(4), rb: pr(5) };
+        const o = prev[p.index] || {};
+        for (const k of Object.keys(st)) if (st[k] && !o[k]) nav(k);
+        prev[p.index] = st;
+      }
+    }
+    requestAnimationFrame(poll);
+  }
+  requestAnimationFrame(poll);
+  function tick() { const d = new Date(); $('#clock').textContent = d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }); }
+  setInterval(tick, 10000); tick();
+  window.ov.onBanner(b => {
+    $('#b1').textContent = b.line1; $('#b2').textContent = b.line2;
+    const e = $('#banner'); e.classList.add('show'); clearTimeout(window.__bt); window.__bt = setTimeout(() => e.classList.remove('show'), b.ms || 7000);
+  });
+  window.ov.onShow(d => {
+    $('#banner').classList.remove('show');
+    const reopen = open && D;
+    D = d;
+    $('#title').textContent = d.title || 'Jeu';
+    $('#sub').textContent = `${d.console ? d.console + '  ·  ' : ''}En pause`;
+    const m = Math.floor((d.seconds || 0) / 60);
+    $('#session').textContent = `Session : ${m < 60 ? m + ' min' : Math.floor(m / 60) + ' h ' + String(m % 60).padStart(2, '0')}`;
+    $('#note').textContent = d.note || '';
+    if (!reopen) { sec = 0; focus = 'menu'; row = 0; }
+    confirm = null; $('#confirm').classList.remove('show');
+    paint();
+    open = true; t0 = Date.now(); prev = {};
+    requestAnimationFrame(() => document.body.classList.add('on'));
+  });
+</script>
+</body></html>
