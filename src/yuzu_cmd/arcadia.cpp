@@ -8,8 +8,16 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <cwchar>
 #include <mutex>
 
+#ifdef _WIN32
+#include <windows.h>
+#include <psapi.h>
+#endif
+
+#include "common/logging.h"
 #include "input_common/drivers/virtual_gamepad.h"
 #include "input_common/main.h"
 
@@ -123,7 +131,81 @@ bool Btn(SDL_Gamepad* p, SDL_GamepadButton b) {
     return p && SDL_GetGamepadButton(p, b);
 }
 
+#ifdef _WIN32
+// Module contenant une adresse : nom + décalage (résolu ensuite avec les symboles de la compilation)
+void DescribeAddress(FILE* f, const char* label, DWORD64 addr) {
+    HMODULE mod = nullptr;
+    char name[MAX_PATH] = "?";
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           reinterpret_cast<LPCSTR>(addr), &mod) && mod) {
+        GetModuleFileNameA(mod, name, MAX_PATH);
+        const char* base = std::strrchr(name, '\\');
+        std::fprintf(f, "%s 0x%016llx  %s+0x%llx\n", label, static_cast<unsigned long long>(addr), base ? base + 1 : name,
+                     static_cast<unsigned long long>(addr - reinterpret_cast<DWORD64>(mod)));
+    } else if (label[0] == 'p') {
+        std::fprintf(f, "%s 0x%016llx  (hors module)\n", label, static_cast<unsigned long long>(addr));
+    }
+}
+
+LONG WINAPI OnCrash(EXCEPTION_POINTERS* ep) {
+    const DWORD code = ep->ExceptionRecord->ExceptionCode;
+    // exceptions de service (débogueur, C++ rattrapées, page de garde de dynarmic…) : on laisse passer
+    static std::atomic<bool> once{false};
+    if (once.exchange(true)) {
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+    Common::Log::Stop(); // vide le journal d'Eden sur le disque
+    wchar_t path[MAX_PATH * 2] = L"";
+    if (const wchar_t* dir = _wgetenv(L"ARCADIA_USER_DIR"); dir && *dir) {
+        swprintf(path, MAX_PATH * 2, L"%ls\\log\\arcadia-crash.txt", dir);
+    } else {
+        GetModuleFileNameW(nullptr, path, MAX_PATH);
+        if (wchar_t* slash = wcsrchr(path, L'\\')) {
+            wcscpy(slash + 1, L"arcadia-crash.txt");
+        }
+    }
+    if (FILE* f = _wfopen(path, L"w")) {
+        SYSTEMTIME t;
+        GetLocalTime(&t);
+        std::fprintf(f, "Arcadia Switch : plantage %04u-%02u-%02u %02u:%02u:%02u\ncode 0x%08lX\n", t.wYear, t.wMonth, t.wDay,
+                     t.wHour, t.wMinute, t.wSecond, code);
+        if (code == EXCEPTION_ACCESS_VIOLATION && ep->ExceptionRecord->NumberParameters >= 2) {
+            std::fprintf(f, "acces %s 0x%016llx\n", ep->ExceptionRecord->ExceptionInformation[0] ? "ecriture" : "lecture",
+                         static_cast<unsigned long long>(ep->ExceptionRecord->ExceptionInformation[1]));
+        }
+        DescribeAddress(f, "pc ", reinterpret_cast<DWORD64>(ep->ExceptionRecord->ExceptionAddress));
+        // adresses de retour probables : valeurs de la pile qui tombent dans un module chargé
+        const DWORD64* sp = reinterpret_cast<const DWORD64*>(ep->ContextRecord->Rsp);
+        int found = 0;
+        for (int i = 0; i < 2048 && found < 40; i++) {
+            MEMORY_BASIC_INFORMATION mbi{};
+            if (!VirtualQuery(sp + i, &mbi, sizeof(mbi)) || mbi.State != MEM_COMMIT) {
+                break;
+            }
+            HMODULE mod = nullptr;
+            const DWORD64 v = sp[i];
+            if (v > 0x10000 && GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                                      GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                                  reinterpret_cast<LPCSTR>(v), &mod) && mod) {
+                DescribeAddress(f, "ret", v);
+                found++;
+            }
+        }
+        std::fclose(f);
+    }
+    Emit("{\"event\":\"crash\"}");
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+#endif
+
 } // namespace
+
+void InstallCrashHandler() {
+#ifdef _WIN32
+    // seulement les plantages que personne n'a rattrapés (dynarmic se sert volontairement de fautes mémoire)
+    SetUnhandledExceptionFilter(OnCrash);
+#endif
+}
 
 bool Enabled() {
     return Env("ARCADIA") != nullptr;
@@ -143,6 +225,7 @@ void Init(InputCommon::InputSubsystem* input, SDL_Window* window) {
     if (!Enabled()) {
         return;
     }
+    InstallCrashHandler(); // au cas où une bibliothèque l'aurait remplacé pendant le chargement
     g_window = window;
     g_pad = input->GetVirtualGamepad();
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");

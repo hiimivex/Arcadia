@@ -165,6 +165,7 @@ struct SdlState {
 };
 
 extern "C" SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
+    Arcadia::InstallCrashHandler();
     SdlState* state = new SdlState();
     *appstate = state;
 

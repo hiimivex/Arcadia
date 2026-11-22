@@ -24,7 +24,7 @@ jobs:
             glslang:p boost:p lz4:p zlib:p zstd:p enet:p opus:p libusb:p sdl3:p ffmpeg:p ntldd:p
       - name: Configurer
         run: |
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_FLAGS=-g1 -DCMAKE_CXX_FLAGS=-g1 \
             -DENABLE_QT=OFF -DYUZU_CMD=ON -DYUZU_ROOM=OFF -DYUZU_ROOM_STANDALONE=OFF -DYUZU_TESTS=OFF \
             -DENABLE_WEB_SERVICE=OFF -DENABLE_UPDATE_CHECKER=OFF -DUSE_DISCORD_PRESENCE=OFF -DENABLE_WERROR=OFF \
             -DYUZU_CRASH_DUMPS=OFF -DENABLE_LIBUSB=OFF
@@ -35,7 +35,10 @@ jobs:
           mkdir -p out
           exe=$(find build -name 'arcadia-switch.exe' -o -name 'eden-cli.exe' | head -1)
           echo "exe: $exe"
-          cp "$exe" out/
+          mkdir -p out/symboles
+          cp "$exe" out/symboles/arcadia-switch.full.exe
+          strip -o out/arcadia-switch.exe "$exe"
+          xz -9 -T0 out/symboles/arcadia-switch.full.exe
           ntldd -R "$exe" | grep -i 'ucrt64' | sed -E 's/.*=> *([^ ]+).*/\1/' | tr '\\' '/' | while read -r d; do cp "$(cygpath -u "$d")" out/ || true; done
           ls -la out
       - uses: actions/upload-artifact@v4

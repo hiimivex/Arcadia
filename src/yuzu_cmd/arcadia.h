@@ -12,6 +12,9 @@ class InputSubsystem;
 
 namespace Arcadia {
 
+/// Rapport de plantage (Windows) : code, module, adresses → <dossier de données>/log/arcadia-crash.txt
+void InstallCrashHandler();
+
 /// Arcadia pilote ce moteur (variable ARCADIA=1 posée par le lanceur)
 bool Enabled();
 
