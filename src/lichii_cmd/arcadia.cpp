@@ -19,6 +19,7 @@
 #endif
 
 #include "common/logging.h"
+#include "common/settings.h"
 #include "input_common/drivers/virtual_gamepad.h"
 #include "input_common/main.h"
 
@@ -36,6 +37,71 @@ Uint64 g_last_poll = 0;
 ArcadiaControls::Map g_map;          // touches réattribuées dans Arcadia (fichier partagé, relu s'il change)
 ArcadiaControls::Watcher g_watch;
 Uint64 g_last_scan = 0;
+
+// Mode 2 joueurs / 2 écrans : clavier lu même quand la fenêtre n'est pas devant (ARCADIA_KB_GLOBAL=1)
+bool g_kb_global = false;
+bool g_kb_state[SDL_SCANCODE_COUNT]{};
+
+#ifdef _WIN32
+// Scancode SDL (USB HID) -> code clavier Windows (jeu 1, 0xE0xx = touche étendue) ; pavé numérique : VK direct (0x1xx)
+int HidToWin(int sc) {
+    static const unsigned short letters[26] = {0x1E,0x30,0x2E,0x20,0x12,0x21,0x22,0x23,0x17,0x24,0x25,0x26,0x32,
+                                               0x31,0x18,0x19,0x10,0x13,0x1F,0x14,0x16,0x2F,0x11,0x2D,0x15,0x2C};
+    if (sc >= 4 && sc <= 29) return letters[sc - 4];
+    if (sc >= 30 && sc <= 39) return 0x02 + (sc - 30);
+    if (sc >= 58 && sc <= 67) return 0x3B + (sc - 58);
+    if (sc >= 89 && sc <= 97) return 0x100 | (VK_NUMPAD1 + (sc - 89));
+    switch (sc) {
+    case 40: return 0x1C; case 41: return 0x01; case 42: return 0x0E; case 43: return 0x0F; case 44: return 0x39;
+    case 45: return 0x0C; case 46: return 0x0D; case 47: return 0x1A; case 48: return 0x1B; case 49: return 0x2B;
+    case 51: return 0x27; case 52: return 0x28; case 53: return 0x29; case 54: return 0x33; case 55: return 0x34;
+    case 56: return 0x35; case 57: return 0x3A; case 68: return 0x57; case 69: return 0x58;
+    case 79: return 0xE04D; case 80: return 0xE04B; case 81: return 0xE050; case 82: return 0xE048;
+    case 84: return 0x100 | VK_DIVIDE; case 85: return 0x100 | VK_MULTIPLY; case 86: return 0x100 | VK_SUBTRACT;
+    case 87: return 0x100 | VK_ADD; case 88: return 0xE01C; case 98: return 0x100 | VK_NUMPAD0; case 99: return 0x100 | VK_DECIMAL;
+    case 224: return 0x1D; case 225: return 0x2A; case 226: return 0x38; case 228: return 0xE01D; case 229: return 0x36;
+    case 230: return 0xE038;
+    default: return 0;
+    }
+}
+
+void ReadGlobalKeyboard() {
+    for (int sc = 0; sc < SDL_SCANCODE_COUNT; sc++) {
+        const int w = HidToWin(sc);
+        if (!w) { g_kb_state[sc] = false; continue; }
+        const UINT vk = (w & 0x100) && w < 0x200 ? (w & 0xFF) : MapVirtualKeyW(w, MAPVK_VSC_TO_VK_EX);
+        g_kb_state[sc] = vk && (GetAsyncKeyState(int(vk)) & 0x8000);
+    }
+}
+#else
+void ReadGlobalKeyboard() {}
+#endif
+
+// Place la fenêtre sur l'écran demandé (ARCADIA_DISPLAY = left | right | numéro) puis plein écran
+void PlaceOnDisplay(SDL_Window* window, const char* which) {
+    int n = 0;
+    SDL_DisplayID* ids = SDL_GetDisplays(&n);
+    if (!ids || n == 0) { SDL_free(ids); return; }
+    std::sort(ids, ids + n, [](SDL_DisplayID a, SDL_DisplayID b) {
+        SDL_Rect ra{}, rb{};
+        SDL_GetDisplayBounds(a, &ra);
+        SDL_GetDisplayBounds(b, &rb);
+        return ra.x != rb.x ? ra.x < rb.x : ra.y < rb.y;
+    });
+    int idx = 0;
+    if (SDL_strcasecmp(which, "right") == 0) idx = n - 1;
+    else if (SDL_strcasecmp(which, "left") != 0) idx = std::clamp(std::atoi(which), 0, n - 1);
+    SDL_Rect r{};
+    if (SDL_GetDisplayBounds(ids[idx], &r)) {
+        SDL_SetWindowFullscreen(window, false);
+        SDL_SetWindowFullscreenMode(window, nullptr); // plein écran fenêtré sans bordure, sur cet écran
+        SDL_SetWindowPosition(window, r.x + r.w / 4, r.y + r.h / 4);
+        SDL_SyncWindow(window);
+        SDL_SetWindowFullscreen(window, true);
+        LOG_INFO(Frontend, "Arcadia: fenêtre sur l'écran {} ({}x{} à {},{})", idx, r.w, r.h, r.x, r.y);
+    }
+    SDL_free(ids);
+}
 
 // Vibrations : la Switch envoie gauche et droite séparément ; on garde la plus forte des deux récentes
 float g_low[2]{}, g_high[2]{};
@@ -77,7 +143,10 @@ void OpenGamepad() {
         return;
     }
     const char* wanted = Env("ARCADIA_PAD_GUID");
-    SDL_JoystickID pick = count > 0 ? ids[0] : 0;
+    // ARCADIA_PAD_SLOT : n-ième manette branchée (joueur 2 = 1) ; pas de repli sur la manette d'un autre joueur
+    const char* slotEnv = Env("ARCADIA_PAD_SLOT");
+    const int slot = slotEnv ? std::max(0, std::atoi(slotEnv)) : 0;
+    SDL_JoystickID pick = count > slot ? ids[slot] : 0;
     if (wanted) {
         for (int i = 0; i < count; i++) {
             char guid[64]{};
@@ -240,6 +309,9 @@ void Init(InputCommon::InputSubsystem* input, SDL_Window* window) {
     if (const char* ctl = Env("ARCADIA_CONTROLS")) g_watch.path = ctl;
     if (!ArcadiaControls::Load(g_watch.path, g_map)) g_map = ArcadiaControls::Defaults(true);
     g_watch.Touch();
+    g_kb_global = Env("ARCADIA_KB_GLOBAL") != nullptr;
+    if (Env("ARCADIA_MUTE")) Settings::values.audio_muted = true; // une seule instance fait le son
+    if (const char* d = Env("ARCADIA_DISPLAY")) PlaceOnDisplay(window, d);
     OpenGamepad();
 }
 
@@ -277,9 +349,16 @@ void Poll() {
     if (dev == AC::KEYBOARD) p = nullptr; // clavier seul
     // Clavier : seulement quand la fenêtre du jeu est devant ; touches par position (AZERTY = QWERTY)
     const bool focused = g_window && (SDL_GetWindowFlags(g_window) & SDL_WINDOW_INPUT_FOCUS);
-    const bool useKb = focused && (dev == AC::BOTH || dev == AC::KEYBOARD);
+    const bool useKb = (focused || g_kb_global) && (dev == AC::BOTH || dev == AC::KEYBOARD);
     int nkeys = 0;
-    const bool* k = useKb ? SDL_GetKeyboardState(&nkeys) : nullptr;
+    const bool* k = nullptr;
+    if (useKb && g_kb_global) {
+        ReadGlobalKeyboard();
+        k = g_kb_state;
+        nkeys = SDL_SCANCODE_COUNT;
+    } else if (useKb) {
+        k = SDL_GetKeyboardState(&nkeys);
+    }
     auto pressed = [&](int a) {
         for (int c : g_map.pad[a]) if (AC::PadDown(p, c)) return true;
         for (int sc : g_map.kb[a]) if (AC::KeyDown(k, nkeys, sc)) return true;

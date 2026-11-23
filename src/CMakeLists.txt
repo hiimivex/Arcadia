@@ -291,7 +291,7 @@ endif()
 
 if (LICHII_ROOM_STANDALONE)
     add_subdirectory(lichii_room_standalone)
-    set_target_properties(lichii-room PROPERTIES OUTPUT_NAME "eden-room")
+    set_target_properties(lichii-room PROPERTIES OUTPUT_NAME "arcadia-room-lib")
 endif()
 
 if (LICHII_STATIC_ROOM)

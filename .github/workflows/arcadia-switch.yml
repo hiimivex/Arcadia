@@ -25,7 +25,7 @@ jobs:
           cmake -S . -B build/release -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_TESTING=OFF -DLICHII_TESTS=OFF \
-            -DENABLE_QT=OFF -DLICHII_CMD=ON -DLICHII_ROOM=OFF -DLICHII_ROOM_STANDALONE=OFF \
+            -DENABLE_QT=OFF -DLICHII_CMD=ON -DLICHII_ROOM=ON -DLICHII_ROOM_STANDALONE=ON \
             -DLICHII_USE_BUNDLED_SDL3=ON \
             -DENABLE_UPDATE_CHECKER=OFF -DUSE_DISCORD_PRESENCE=OFF -DENABLE_WEB_SERVICE=OFF \
             -DLICHII_BUILD_PLATFORM=windows-x86_64 \
@@ -39,7 +39,7 @@ jobs:
             "-DCMAKE_CXX_FLAGS=-EHsc $flags"
       - name: Compiler
         shell: bash
-        run: cmake --build build/release --target lichii-cmd
+        run: cmake --build build/release --target lichii-cmd lichii_room_standalone
       - name: Rassembler
         shell: bash
         run: |
@@ -48,6 +48,9 @@ jobs:
           exe=$(find build/release -name 'arcadia-switch.exe' | head -1)
           echo "exe: $exe"
           cp "$exe" out/
+          room=$(find build/release -name 'arcadia-room.exe' | head -1)
+          echo "room: $room"
+          cp "$room" out/
           dir=$(dirname "$exe")
           find "$dir" -maxdepth 1 -name '*.dll' -exec cp {} out/ \;
           pdb=$(find build/release -name 'arcadia-switch.pdb' | head -1 || true)
