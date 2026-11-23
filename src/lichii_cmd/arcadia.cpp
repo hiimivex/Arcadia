@@ -2,6 +2,7 @@
 // Arcadia : manette(s) + clavier fusionnés en une manette virtuelle (joueur 1), vibrations vers la vraie manette.
 
 #include "lichii_cmd/arcadia.h"
+#include "lichii_cmd/arcadia_controls.h"
 
 #include <algorithm>
 #include <atomic>
@@ -32,6 +33,8 @@ SDL_Window* g_window = nullptr;
 SDL_Gamepad* g_gamepad = nullptr;
 std::mutex g_gamepad_mutex;
 Uint64 g_last_poll = 0;
+ArcadiaControls::Map g_map;          // touches réattribuées dans Arcadia (fichier partagé, relu s'il change)
+ArcadiaControls::Watcher g_watch;
 Uint64 g_last_scan = 0;
 
 // Vibrations : la Switch envoie gauche et droite séparément ; on garde la plus forte des deux récentes
@@ -234,6 +237,9 @@ void Init(InputCommon::InputSubsystem* input, SDL_Window* window) {
         SDL_AddGamepadMappingsFromFile(db); // calibrages faits dans Arcadia
     }
     InputCommon::VirtualGamepad::SetVibrationCallback(OnVibration);
+    if (const char* ctl = Env("ARCADIA_CONTROLS")) g_watch.path = ctl;
+    if (!ArcadiaControls::Load(g_watch.path, g_map)) g_map = ArcadiaControls::Defaults(true);
+    g_watch.Touch();
     OpenGamepad();
 }
 
@@ -260,55 +266,52 @@ void Poll() {
         OpenGamepad();
     }
 
+    namespace AC = ArcadiaControls;
+    if (g_watch.Changed()) AC::Load(g_watch.path, g_map); // changé depuis le menu Échap d'Arcadia
     SDL_Gamepad* p;
     {
         std::scoped_lock lk{g_gamepad_mutex};
         p = g_gamepad;
     }
+    const AC::Device dev = g_map.device;
+    if (dev == AC::KEYBOARD) p = nullptr; // clavier seul
     // Clavier : seulement quand la fenêtre du jeu est devant ; touches par position (AZERTY = QWERTY)
     const bool focused = g_window && (SDL_GetWindowFlags(g_window) & SDL_WINDOW_INPUT_FOCUS);
+    const bool useKb = focused && (dev == AC::BOTH || dev == AC::KEYBOARD);
     int nkeys = 0;
-    const bool* k = SDL_GetKeyboardState(&nkeys);
-    auto key = [&](SDL_Scancode sc) { return focused && k && sc < nkeys && k[sc]; };
+    const bool* k = useKb ? SDL_GetKeyboardState(&nkeys) : nullptr;
+    auto pressed = [&](int a) {
+        for (int c : g_map.pad[a]) if (AC::PadDown(p, c)) return true;
+        for (int sc : g_map.kb[a]) if (AC::KeyDown(k, nkeys, sc)) return true;
+        return false;
+    };
+    static const VB kButton[AC::HOME + 1] = { VB::ButtonA, VB::ButtonB, VB::ButtonX, VB::ButtonY, VB::TriggerL, VB::TriggerR,
+        VB::TriggerZL, VB::TriggerZR, VB::ButtonPlus, VB::ButtonMinus, VB::StickL, VB::StickR, VB::ButtonUp, VB::ButtonDown,
+        VB::ButtonLeft, VB::ButtonRight, VB::ButtonHome };
+    for (int a = 0; a <= AC::HOME; a++) g_pad->SetButtonState(0, kButton[a], pressed(a));
+    g_pad->SetButtonState(0, VB::ButtonCapture, Btn(p, SDL_GAMEPAD_BUTTON_MISC1));
 
-    // Disposition Switch par position : bouton du bas = B, droite = A, haut = X, gauche = Y
-    auto set = [&](VB b, bool v) { g_pad->SetButtonState(0, b, v); };
-    set(VB::ButtonA, Btn(p, SDL_GAMEPAD_BUTTON_EAST) || key(SDL_SCANCODE_L));
-    set(VB::ButtonB, Btn(p, SDL_GAMEPAD_BUTTON_SOUTH) || key(SDL_SCANCODE_K));
-    set(VB::ButtonX, Btn(p, SDL_GAMEPAD_BUTTON_NORTH) || key(SDL_SCANCODE_I));
-    set(VB::ButtonY, Btn(p, SDL_GAMEPAD_BUTTON_WEST) || key(SDL_SCANCODE_J));
-    set(VB::TriggerL, Btn(p, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER) || key(SDL_SCANCODE_Q));
-    set(VB::TriggerR, Btn(p, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER) || key(SDL_SCANCODE_E));
-    set(VB::TriggerZL, Axis(p, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 0.5f || key(SDL_SCANCODE_1));
-    set(VB::TriggerZR, Axis(p, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 0.5f || key(SDL_SCANCODE_3));
-    set(VB::ButtonPlus, Btn(p, SDL_GAMEPAD_BUTTON_START) || key(SDL_SCANCODE_RETURN));
-    set(VB::ButtonMinus, Btn(p, SDL_GAMEPAD_BUTTON_BACK) || key(SDL_SCANCODE_BACKSPACE));
-    set(VB::StickL, Btn(p, SDL_GAMEPAD_BUTTON_LEFT_STICK) || key(SDL_SCANCODE_LSHIFT));
-    set(VB::StickR, Btn(p, SDL_GAMEPAD_BUTTON_RIGHT_STICK) || key(SDL_SCANCODE_B));
-    set(VB::ButtonUp, Btn(p, SDL_GAMEPAD_BUTTON_DPAD_UP) || key(SDL_SCANCODE_UP));
-    set(VB::ButtonDown, Btn(p, SDL_GAMEPAD_BUTTON_DPAD_DOWN) || key(SDL_SCANCODE_DOWN));
-    set(VB::ButtonLeft, Btn(p, SDL_GAMEPAD_BUTTON_DPAD_LEFT) || key(SDL_SCANCODE_LEFT));
-    set(VB::ButtonRight, Btn(p, SDL_GAMEPAD_BUTTON_DPAD_RIGHT) || key(SDL_SCANCODE_RIGHT));
-    set(VB::ButtonHome, key(SDL_SCANCODE_HOME)); // le bouton Guide ouvre le menu d'Arcadia
-    set(VB::ButtonCapture, Btn(p, SDL_GAMEPAD_BUTTON_MISC1));
-
-    // Sticks : le plus grand des deux (manette ou clavier) ; haut = positif côté Switch
-    auto stick = [&](VS s, SDL_GamepadAxis ax, SDL_GamepadAxis ay, SDL_Scancode up, SDL_Scancode left,
-                     SDL_Scancode down, SDL_Scancode right) {
+    // Sticks : manette, sauf si une direction clavier est tenue ; stick arcade : le levier (croix) pilote aussi le stick gauche
+    auto stick = [&](VS s, SDL_GamepadAxis ax, SDL_GamepadAxis ay, int up) {
         float x = Axis(p, ax), y = -Axis(p, ay);
-        const float kx = (key(right) ? 1.f : 0.f) - (key(left) ? 1.f : 0.f);
-        const float ky = (key(up) ? 1.f : 0.f) - (key(down) ? 1.f : 0.f);
-        if (kx != 0.f || ky != 0.f) {
-            const float n = std::sqrt(kx * kx + ky * ky);
+        int kx = 0, ky = 0;
+        for (int sc : g_map.kb[up + 3]) if (AC::KeyDown(k, nkeys, sc)) kx++;
+        for (int sc : g_map.kb[up + 2]) if (AC::KeyDown(k, nkeys, sc)) kx--;
+        for (int sc : g_map.kb[up + 0]) if (AC::KeyDown(k, nkeys, sc)) ky++;
+        for (int sc : g_map.kb[up + 1]) if (AC::KeyDown(k, nkeys, sc)) ky--;
+        if (dev == AC::STICK && s == VS::Left && p) {
+            kx += (Btn(p, SDL_GAMEPAD_BUTTON_DPAD_RIGHT) ? 1 : 0) - (Btn(p, SDL_GAMEPAD_BUTTON_DPAD_LEFT) ? 1 : 0);
+            ky += (Btn(p, SDL_GAMEPAD_BUTTON_DPAD_UP) ? 1 : 0) - (Btn(p, SDL_GAMEPAD_BUTTON_DPAD_DOWN) ? 1 : 0);
+        }
+        if (kx != 0 || ky != 0) {
+            const float n = std::sqrt(float(kx * kx + ky * ky));
             x = kx / n;
             y = ky / n;
         }
         g_pad->SetStickPosition(0, s, std::clamp(x, -1.f, 1.f), std::clamp(y, -1.f, 1.f));
     };
-    stick(VS::Left, SDL_GAMEPAD_AXIS_LEFTX, SDL_GAMEPAD_AXIS_LEFTY, SDL_SCANCODE_W, SDL_SCANCODE_A,
-          SDL_SCANCODE_S, SDL_SCANCODE_D);
-    stick(VS::Right, SDL_GAMEPAD_AXIS_RIGHTX, SDL_GAMEPAD_AXIS_RIGHTY, SDL_SCANCODE_T, SDL_SCANCODE_F,
-          SDL_SCANCODE_G, SDL_SCANCODE_H);
+    stick(VS::Left, SDL_GAMEPAD_AXIS_LEFTX, SDL_GAMEPAD_AXIS_LEFTY, AC::LS_UP);
+    stick(VS::Right, SDL_GAMEPAD_AXIS_RIGHTX, SDL_GAMEPAD_AXIS_RIGHTY, AC::RS_UP);
 }
 
 void Shutdown() {
