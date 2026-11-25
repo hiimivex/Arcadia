@@ -32,6 +32,8 @@ void Poll();
 
 /// Message au lanceur Arcadia (une ligne JSON sur la sortie standard)
 void Emit(const std::string& json);
+// Images/s, vitesse (%), temps par image (ms) : écrits dans ARCADIA_STATS pour le compteur d'Arcadia
+void ReportStats(double fps, double speed, double frametime_ms);
 
 void Shutdown();
 

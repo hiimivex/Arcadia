@@ -37,9 +37,10 @@ EmuWindow_SDL3::EmuWindow_SDL3(InputCommon::InputSubsystem* input_subsystem_, Co
         LOG_CRITICAL(Frontend, "Failed to initialize SDL3: {}, Exiting...", SDL_GetError());
         exit(1);
     }
-    titlebar_timer = SDL_AddTimer(2000, [](void *userdata, SDL_TimerID, Uint32) -> Uint32 {
+    titlebar_timer = SDL_AddTimer(Arcadia::Enabled() ? 1000 : 2000, [](void *userdata, SDL_TimerID, Uint32) -> Uint32 {
         auto* this_ = (EmuWindow_SDL3*)userdata;
         auto const results = this_->system.GetAndResetPerfStats();
+        Arcadia::ReportStats(results.average_game_fps, results.emulation_speed * 100.0, results.frametime * 1000.0); // compteur d'images/s d'Arcadia
         const std::string arcadia_title = Arcadia::WindowTitle();
         auto* const title = new std::string(!arcadia_title.empty() ? arcadia_title : fmt::format("{} | {}-{} | FPS: {:.0f} ({:.0f}%)", Common::g_build_fullname, Common::g_scm_branch, Common::g_scm_desc, results.average_game_fps, results.emulation_speed * 100.0f));
         // Timers run on their own thread and AppKit throws when a title is set off the main
@@ -50,7 +51,7 @@ EmuWindow_SDL3::EmuWindow_SDL3(InputCommon::InputSubsystem* input_subsystem_, Co
             LOG_INFO(Frontend, "FPS: {:.1f} speed: {:.0f}% frametime: {:.2f} ms", results.average_game_fps,
                      results.emulation_speed * 100.0, results.frametime * 1000.0);
         }
-        return 2000;
+        return Arcadia::Enabled() ? 1000 : 2000;
     }, this);
     mouse_timer = SDL_AddTimer(100, [](void *userdata, SDL_TimerID, Uint32) -> Uint32 {
         auto* this_ = (EmuWindow_SDL3*)userdata;

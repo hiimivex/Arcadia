@@ -288,6 +288,15 @@ std::string WindowTitle() {
     return t ? std::string{t} : std::string{};
 }
 
+void ReportStats(double fps, double speed, double frametime_ms) {
+    const char* path = Env("ARCADIA_STATS");
+    if (!path) return;
+    if (SDL_IOStream* f = SDL_IOFromFile(path, "wb")) { // chemin UTF-8 (accents dans le dossier utilisateur)
+        SDL_IOprintf(f, "{\"fps\":%.1f,\"speed\":%.0f,\"ms\":%.2f,\"t\":%llu}", fps, speed, frametime_ms, (unsigned long long)SDL_GetTicks());
+        SDL_CloseIO(f);
+    }
+}
+
 void Emit(const std::string& json) {
     std::fputs((json + "\n").c_str(), stdout);
     std::fflush(stdout);
