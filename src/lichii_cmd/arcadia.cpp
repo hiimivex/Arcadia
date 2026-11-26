@@ -40,6 +40,42 @@ Uint64 g_last_scan = 0;
 
 // Mode 2 joueurs / 2 écrans : clavier lu même quand la fenêtre n'est pas devant (ARCADIA_KB_GLOBAL=1)
 bool g_kb_global = false;
+// Souris en mode clavier : caméra (stick droit) + clics (ZR / ZL). ARCADIA_MOUSE = camera (défaut) | off
+bool g_mouse_cam = true;
+float g_mouse_dx = 0, g_mouse_dy = 0, g_cam_x = 0, g_cam_y = 0;
+bool g_rel = false;
+// Réglages vidéo/son appliqués en direct (fichier écrit par Arcadia, relu s'il change)
+ArcadiaControls::Watcher g_live;
+void ApplyLive() {
+    size_t sz = 0;
+    char* txt = (char*)SDL_LoadFile(g_live.path.c_str(), &sz);
+    if (!txt) return;
+    std::string all(txt, sz);
+    SDL_free(txt);
+    bool layout = false;
+    size_t pos = 0;
+    while (pos < all.size()) {
+        size_t nl = all.find('\n', pos);
+        std::string line = all.substr(pos, nl == std::string::npos ? std::string::npos : nl - pos);
+        pos = nl == std::string::npos ? all.size() : nl + 1;
+        const size_t eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        const std::string k = line.substr(0, eq);
+        const int v = std::atoi(line.c_str() + eq + 1);
+        const bool b = line.compare(eq + 1, 4, "true") == 0;
+        if (k == "scaling_filter") Settings::values.scaling_filter.SetValue(static_cast<Settings::ScalingFilter>(v));
+        else if (k == "anti_aliasing") Settings::values.anti_aliasing.SetValue(static_cast<Settings::AntiAliasing>(v));
+        else if (k == "aspect_ratio") { Settings::values.aspect_ratio.SetValue(static_cast<Settings::AspectRatio>(v)); layout = true; }
+        else if (k == "volume") Settings::values.volume.SetValue(static_cast<u8>(std::clamp(v, 0, 200)));
+        else if (k == "audio_muted") Settings::values.audio_muted.SetValue(b);
+        else if (k == "fsr_sharpening_slider") Settings::values.fsr_sharpening_slider.SetValue(std::clamp(v, 0, 200));
+    }
+    if (layout && g_window) { // recalcule la mise en page de l'image (format)
+        SDL_Event e{}; e.type = SDL_EVENT_WINDOW_RESIZED; e.window.windowID = SDL_GetWindowID(g_window);
+        SDL_GetWindowSize(g_window, &e.window.data1, &e.window.data2); SDL_PushEvent(&e);
+    }
+    LOG_INFO(Frontend, "Arcadia: réglages appliqués en direct");
+}
 bool g_kb_state[SDL_SCANCODE_COUNT]{};
 
 #ifdef _WIN32
@@ -319,6 +355,8 @@ void Init(InputCommon::InputSubsystem* input, SDL_Window* window) {
     if (!ArcadiaControls::Load(g_watch.path, g_map)) g_map = ArcadiaControls::Defaults(true);
     g_watch.Touch();
     g_kb_global = Env("ARCADIA_KB_GLOBAL") != nullptr;
+    if (const char* m = Env("ARCADIA_MOUSE")) g_mouse_cam = SDL_strcasecmp(m, "off") != 0;
+    if (const char* l = Env("ARCADIA_LIVE")) { g_live.path = l; g_live.Touch(); }
     if (Env("ARCADIA_MUTE")) Settings::values.audio_muted = true; // une seule instance fait le son
     if (const char* d = Env("ARCADIA_DISPLAY")) PlaceOnDisplay(window, d);
     OpenGamepad();
@@ -331,6 +369,7 @@ void OnEvent(const SDL_Event& event) {
     if (event.type == SDL_EVENT_GAMEPAD_ADDED || event.type == SDL_EVENT_GAMEPAD_REMOVED) {
         OpenGamepad();
     }
+    if (event.type == SDL_EVENT_MOUSE_MOTION && g_rel) { g_mouse_dx += event.motion.xrel; g_mouse_dy += event.motion.yrel; }
 }
 
 void Poll() {
@@ -349,6 +388,7 @@ void Poll() {
 
     namespace AC = ArcadiaControls;
     if (g_watch.Changed()) AC::Load(g_watch.path, g_map); // changé depuis le menu Échap d'Arcadia
+    if (g_live.Changed()) ApplyLive();
     SDL_Gamepad* p;
     {
         std::scoped_lock lk{g_gamepad_mutex};
@@ -359,6 +399,15 @@ void Poll() {
     // Clavier : seulement quand la fenêtre du jeu est devant ; touches par position (AZERTY = QWERTY)
     const bool focused = g_window && (SDL_GetWindowFlags(g_window) & SDL_WINDOW_INPUT_FOCUS);
     const bool useKb = (focused || g_kb_global) && (dev == AC::BOTH || dev == AC::KEYBOARD);
+    // Souris = caméra : curseur capturé dans la fenêtre du jeu (relâché dès qu'elle n'est plus devant)
+    const bool wantRel = g_mouse_cam && focused && (dev == AC::BOTH || dev == AC::KEYBOARD);
+    if (wantRel != g_rel && g_window) { SDL_SetWindowRelativeMouseMode(g_window, wantRel); g_rel = wantRel; g_mouse_dx = g_mouse_dy = 0; }
+    if (g_rel) { // mouvement → stick droit, adouci
+        g_cam_x = g_cam_x * 0.55f + std::clamp(g_mouse_dx / 18.f, -1.f, 1.f) * 0.45f;
+        g_cam_y = g_cam_y * 0.55f + std::clamp(-g_mouse_dy / 18.f, -1.f, 1.f) * 0.45f;
+        g_mouse_dx = g_mouse_dy = 0;
+    } else { g_cam_x = g_cam_y = 0; }
+    const SDL_MouseButtonFlags mb = g_rel ? SDL_GetMouseState(nullptr, nullptr) : 0;
     int nkeys = 0;
     const bool* k = nullptr;
     if (useKb && g_kb_global) {
@@ -376,7 +425,12 @@ void Poll() {
     static const VB kButton[AC::HOME + 1] = { VB::ButtonA, VB::ButtonB, VB::ButtonX, VB::ButtonY, VB::TriggerL, VB::TriggerR,
         VB::TriggerZL, VB::TriggerZR, VB::ButtonPlus, VB::ButtonMinus, VB::StickL, VB::StickR, VB::ButtonUp, VB::ButtonDown,
         VB::ButtonLeft, VB::ButtonRight, VB::ButtonHome };
-    for (int a = 0; a <= AC::HOME; a++) g_pad->SetButtonState(0, kButton[a], pressed(a));
+    for (int a = 0; a <= AC::HOME; a++) {
+        bool on = pressed(a);
+        if (a == AC::ZR && (mb & SDL_BUTTON_LMASK)) on = true; // clic gauche
+        if (a == AC::ZL && (mb & SDL_BUTTON_RMASK)) on = true; // clic droit
+        g_pad->SetButtonState(0, kButton[a], on);
+    }
     g_pad->SetButtonState(0, VB::ButtonCapture, Btn(p, SDL_GAMEPAD_BUTTON_MISC1));
 
     // Sticks : manette, sauf si une direction clavier est tenue ; stick arcade : le levier (croix) pilote aussi le stick gauche
@@ -391,6 +445,7 @@ void Poll() {
             kx += (Btn(p, SDL_GAMEPAD_BUTTON_DPAD_RIGHT) ? 1 : 0) - (Btn(p, SDL_GAMEPAD_BUTTON_DPAD_LEFT) ? 1 : 0);
             ky += (Btn(p, SDL_GAMEPAD_BUTTON_DPAD_UP) ? 1 : 0) - (Btn(p, SDL_GAMEPAD_BUTTON_DPAD_DOWN) ? 1 : 0);
         }
+        if (s == VS::Right && kx == 0 && ky == 0 && (std::abs(g_cam_x) > 0.02f || std::abs(g_cam_y) > 0.02f)) { x = g_cam_x; y = g_cam_y; }
         if (kx != 0 || ky != 0) {
             const float n = std::sqrt(float(kx * kx + ky * ky));
             x = kx / n;
