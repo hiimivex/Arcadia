@@ -2,6 +2,33 @@
 // type : add = ajout, change = modification, fix = correctif
 const CHANGELOG = [
   {
+    v: '1.27.0', date: '2026-11-26',
+    items: [
+      ['add', 'Mario Kart 8 Deluxe en ligne entre amis : bouton « 🌐 En ligne » sur la page du jeu. Un ami héberge un salon privé (gratuit, sans compte, sans serveur), les autres le rejoignent avec un code d\'invitation. Même Wi-Fi ou par Internet (ouverture automatique du port de la box quand elle le permet). Dans le jeu : « Sans fil local ».', 'Mario Kart 8 Deluxe online with friends: "🌐 Online" button on the game page. One friend hosts a private room (free, no account, no server), the others join with an invite code. Same Wi-Fi or over the Internet (router port opened automatically when possible). In the game: "Local Wireless Play".'],
+      ['add', 'Rembobinage dans le moteur Arcadia (PSP, DS, GBA, PS1, SNES…) : maintiens R au clavier, ou Guide + LT à la manette, pour revenir quelques secondes en arrière.', 'Rewind in the Arcadia engine (PSP, DS, GBA, PS1, SNES…): hold R on the keyboard, or Guide + LT on a controller, to go back a few seconds.'],
+      ['add', 'Avance rapide maintenue : Guide + RT = ×3 tant que tu appuies (Tab / Guide + RB restent le turbo ×2).', 'Hold-to-fast-forward: Guide + RT = ×3 while held (Tab / Guide + RB stay the ×2 turbo).'],
+      ['add', 'Nom du profil Switch au choix : tes jeux Switch ne t\'appellent plus « Eden ». Demandé au premier jeu Switch, modifiable dans Paramètres → Général → Profil de joueur. Tes sauvegardes ne changent pas.', 'Choose your Switch profile name: your Switch games no longer call you "Eden". Asked on your first Switch game, editable in Settings → General → Player profile. Your saves don\'t change.'],
+      ['change', 'Menu Échap du moteur Arcadia : la rubrique « Cheat » devient « Rembobinage », avec l\'option pour le désactiver.', 'Arcadia engine Esc menu: the "Cheat" section becomes "Rewind", with an option to turn it off.'],
+      ['fix', 'Jeux Switch : l\'identifiant du jeu n\'était plus lu depuis la 1.24.0, ce qui pouvait bloquer l\'actualisation de la bibliothèque.', 'Switch games: the title ID was no longer read since 1.24.0, which could block library refresh.']
+    ]
+  },
+  {
+    v: '1.26.0', date: '2026-11-26',
+    items: [
+      ['change', 'Mises à jour : dès qu\'une nouvelle version est publiée sur GitHub, Arcadia affiche « Mise à jour disponible ». Un clic sur « Mettre à jour » la télécharge (barre de progression réelle), vérifie son empreinte, l\'installe et redémarre Arcadia tout seul.', 'Updates: as soon as a new version is published on GitHub, Arcadia shows "Update available". One click on "Update" downloads it (real progress bar), checks its checksum, installs it and restarts Arcadia on its own.'],
+      ['change', 'Plus de téléchargement en arrière-plan sans ton accord.', 'No more background download without your consent.'],
+      ['fix', 'La barre de l\'écran de mise à jour était en retard sur le pourcentage affiché.', 'The update screen bar lagged behind the displayed percentage.']
+    ]
+  },
+  {
+    v: '1.25.0', date: '2026-11-26',
+    items: [
+      ['add', 'Glisser-déposer des fichiers système : clés Switch (prod.keys), firmware Switch (dossier, .zip ou .nca), BIOS PS1 / PS2 / Dreamcast / Xbox et firmware PS3 / PS Vita (.PUP) sont reconnus et installés tout seuls dans le bon moteur. Les jeux déposés en même temps sont importés comme d\'habitude.', 'Drag & drop system files: Switch keys (prod.keys), Switch firmware (folder, .zip or .nca), PS1 / PS2 / Dreamcast / Xbox BIOS and PS3 / PS Vita firmware (.PUP) are recognized and installed into the right engine automatically. Games dropped at the same time are imported as usual.'],
+      ['add', 'Ligne « Clés et firmware Switch » dans Paramètres → Général → BIOS et firmware des consoles.', '"Switch keys and firmware" row in Settings → General → Console BIOS and firmware.'],
+      ['fix', 'Clés, firmware et BIOS trouvés dans un dossier de jeux ne sont plus rangés comme des jeux.', 'Keys, firmware and BIOS found in a games folder are no longer filed as games.']
+    ]
+  },
+  {
     v: '1.24.0', date: '2026-11-26',
     items: [
       ['add', 'Mises à jour en ligne : Arcadia vérifie GitHub au démarrage puis toutes les 6 h, télécharge la nouvelle version en arrière-plan (empreinte vérifiée) et propose de l\'installer.', 'Online updates: Arcadia checks GitHub at startup and every 6 hours, downloads the new version in the background (checksum verified) and offers to install it.'],

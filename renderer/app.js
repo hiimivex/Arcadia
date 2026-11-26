@@ -303,6 +303,8 @@ function renderGame() {
   play.disabled = !!warn;
   play.classList.toggle('running', running.has(g.id));
   $('#g-play-label').textContent = running.has(g.id) ? 'EN COURS' : 'JOUER';
+  $('#g-online').classList.toggle('hidden', !isMk8(g) || !!warn);
+  $('#g-online').disabled = running.has(g.id);
   // catégories
   const chips = $('#g-cats');
   chips.replaceChildren();
@@ -564,6 +566,7 @@ function openCollection(key) {
 async function play(id, o) {
   const g = gameById(id);
   if (!g) return;
+  if (!(await askSwitchProfile(g))) return;
   sfx('launch');
   const newer = o && o.skipResume ? null : await arcadia.savesCheck(id);
   if (newer && await confirmBox('Sauvegarde plus récente trouvée', `Une copie de tes sauvegardes faite sur « ${newer.machine} » le ${newer.date.replace('_', ' à ').replace(/-(\d\d)-(\d\d)$/, 'h$1')} est plus récente que celle de ce PC. La restaurer avant de jouer ? (L'état actuel est copié avant, par sécurité.)`)) {
@@ -956,7 +959,7 @@ async function renderSettings(nav, content, foot) {
       ck.disabled = false; ck.textContent = 'Rechercher des mises à jour';
       if (!r.ok) toast(`Mise à jour impossible : ${r.error}`, true);
       else if (r.upToDate) toast(`Arcadia est à jour (${S.version})`);
-      else toast(`Arcadia ${r.version} téléchargé : la bannière de mise à jour arrive`);
+      else toast(`Arcadia ${r.version} est disponible`);
     };
     a.append(ck);
     const tv = el('button', 'btn-ghost', 'Revoir la visite guidée'); tv.onclick = () => { closeModal(); runTour(0, () => {}); }; a.append(tv);
@@ -977,8 +980,15 @@ async function renderSettings(nav, content, foot) {
       appField('PS1 en écran large (16:9)', 'ps1Wide', 'bool', null, 'Pour les jeux PS1 qui ont un patch 16:9 dans la base communautaire DuckStation : l\'image remplit tout l\'écran sans être étirée. S\'applique au prochain lancement.'),
       appField('Mode Canapé quand une manette s\'allume', 'couchAuto', 'bool', null, 'Arcadia passe tout seul en plein écran manette dès que tu allumes une manette.'),
       introField(),
-      appField('Mises à jour automatiques', 'autoUpdate', 'bool', null, 'Arcadia vérifie GitHub au démarrage puis toutes les 6 h, télécharge la nouvelle version en arrière-plan et te propose de l\'installer.')
+      appField('Mises à jour automatiques', 'autoUpdate', 'bool', null, 'Arcadia vérifie GitHub au démarrage puis toutes les 6 h et te prévient quand une nouvelle version sort. Un clic sur « Mettre à jour » : elle se télécharge, s\'installe et Arcadia redémarre.')
     ]));
+    {
+      const pr = el('div', 'tool');
+      const pd = el('div', 'td'); pd.append(el('b', '', 'Nom du profil Switch'), el('div', '', S.settings.switchProfile ? `« ${S.settings.switchProfile} » dans tous tes jeux Switch, au lieu de « Eden ».` : 'Tes jeux Switch t\'appellent « Eden » : choisis ton propre nom.'));
+      const pb = el('button', 'btn-ghost', 'Changer…'); pb.onclick = async () => { await askSwitchProfile({ console: 'SWITCH' }, true); SET.render(); };
+      pr.append(pd, pb);
+      content.append(group('Profil de joueur', [pr]));
+    }
     content.append(group('Pages de jeu', [appField('Clé SteamGridDB (facultative)', 'sgdbKey', 'text', null, 'Pour de grandes bannières façon Steam en haut de chaque jeu. Clé gratuite : crée un compte sur steamgriddb.com puis Préférences → API. Sans clé, Arcadia utilise une capture du jeu.')]));
     content.append(await biosGroup());
     const padRow = el('div', 'tool');
@@ -1303,6 +1313,17 @@ window.addEventListener('drop', e => {
 });
 
 async function startImport(paths, runner) {
+  // Clés, firmware et BIOS déposés : installés dans le bon moteur, le reste part à l'importation
+  if (paths && paths.length) {
+    const sys = await arcadia.systemDrop(paths).catch(() => null);
+    if (sys) {
+      sys.done.forEach(m => toast(`✓ ${m}`));
+      sys.errors.forEach(m => toast(m, true));
+      if (sys.state) { S = sys.state; renderAll(); }
+      paths = sys.rest;
+      if (!paths.length) return;
+    }
+  }
   if (!S.libraryDir) { toast("Choisis d'abord le dossier de ta bibliothèque.", true); return; }
   const box = $('#import');
   box.classList.remove('hidden');
@@ -1511,6 +1532,7 @@ $('.tab[data-view=stats]').onclick = () => showStats();
 $('#imp-close').onclick = () => $('#import').classList.add('hidden');
 $('#modal').onclick = e => { if (e.target.id === 'modal') closeModal(); };
 $('#g-play').onclick = () => selectedId && play(selectedId);
+$('#g-online').onclick = async () => { if (!selectedId) return; const g = gameById(selectedId); if (await askSwitchProfile(g)) onlineModal(g); };
 $('#g-fav').onclick = async () => { S = await arcadia.toggleFavorite(selectedId); renderAll(); };
 $('#g-more').onclick = e => { const r = e.currentTarget.getBoundingClientRect(); gameMenu(r.left - 180, r.bottom + 4, gameById(selectedId)); e.stopPropagation(); };
 $('#search').oninput = () => { renderSidebar(); if (view === 'home') renderHome(); else if ($('#search').value) showHome(); };
@@ -1599,6 +1621,70 @@ function pickLanguage() {
   if (S.settings.bigPictureOnStart) bpOpen();
 })();
 // Écran de mise à jour : l'interface se dissout en pixels, puis Arcadia redémarre
+// ------------------------------------------------------------ nom du profil de joueur Switch (au lieu de « Eden »)
+async function askSwitchProfile(g, force) {
+  if (!g || (g.console !== 'SWITCH' && g.console !== 'SWITCH 2')) return true;
+  if (S.settings.switchProfile && !force) return true;
+  const n = await prompt('Ton nom de joueur Switch', S.settings.switchProfile || '', 'C\'est le nom de ton profil dans les jeux Switch (10 caractères maximum), à la place de « Eden ». Tes sauvegardes ne changent pas.');
+  if (n === null) return !force && !!S.settings.switchProfile;
+  const name = n.slice(0, 10) || 'Joueur';
+  const r = await arcadia.setSwitchProfile(name).catch(() => null);
+  if (r && r.state) { S = r.state; toast(`Profil Switch : ${r.name}`); }
+  return true;
+}
+// ------------------------------------------------------------ Mario Kart 8 Deluxe en ligne entre amis (salon privé gratuit)
+const isMk8 = g => !!g && g.console === 'SWITCH' && (String(g.titleId || '').toUpperCase() === '0100152000022000' || /mario\s*kart\s*8/i.test(g.title || ''));
+function onlineModal(g) {
+  const tips = role => {
+    const ul = el('ol', 'net-steps');
+    const steps = role === 'host'
+      ? ['Dans Mario Kart : Sans fil local → choisis le nombre de joueurs sur ton PC → Créer une salle.', 'Attends que tes amis apparaissent, puis lance la course.']
+      : ['Dans Mario Kart : Sans fil local → choisis le nombre de joueurs sur ton PC.', 'La salle de ton ami apparaît : rejoins-la.'];
+    for (const s of steps) ul.append(el('li', '', s));
+    return ul;
+  };
+  openModal(c => {
+    c.classList.add('net-modal');
+    c.append(el('div', 'fr-tag', '// en ligne entre amis'), el('h2', '', `${g.title} · salon privé`));
+    c.append(el('p', 'muted', 'Gratuit et sans compte : un ami héberge le salon sur son PC, les autres le rejoignent avec son code. Jusqu\'à 8 PC, et plusieurs joueurs par PC.'));
+    const row = el('div', 'lang-pick');
+    const hb = el('button', 'lang-btn'); hb.append(el('b', '', 'Héberger'), el('span', '', 'Je crée le salon et j\'invite'));
+    const jb = el('button', 'lang-btn'); jb.append(el('b', '', 'Rejoindre'), el('span', '', 'J\'ai reçu un code'));
+    row.append(hb, jb); c.append(row);
+    const zone = el('div', 'net-zone'); c.append(zone);
+    const a = el('div', 'modal-actions'); const close = el('button', 'btn-ghost', 'Fermer'); close.onclick = () => closeModal(); a.append(close); c.append(a);
+    hb.onclick = async () => {
+      hb.disabled = jb.disabled = true; zone.replaceChildren(el('p', 'muted', 'Ouverture du salon…'));
+      const r = await arcadia.swnetHost(g.id).catch(e => ({ ok: false, error: e.message }));
+      hb.disabled = jb.disabled = false;
+      if (!r.ok) { zone.replaceChildren(el('p', 'net-err', r.error)); return; }
+      const codeBox = el('div', 'net-code'); codeBox.setAttribute('data-notr', ''); codeBox.textContent = r.code;
+      const copy = el('button', 'btn-ghost', 'Copier le code'); copy.onclick = () => { navigator.clipboard.writeText(r.code); toast('Code copié : envoie-le à tes amis'); };
+      const reach = el('div', 'net-reach');
+      reach.append(el('div', 'ok', `✓ Même Wi-Fi / même box : tes amis te rejoignent directement (${r.lan || 'réseau local'}).`));
+      reach.append(r.upnp ? el('div', 'ok', '✓ Par Internet : ta box a ouvert le port toute seule.') : el('div', 'warn', `⚠ Par Internet : ta box n'a pas ouvert le port toute seule. Dans l'interface de ta box, redirige le port UDP ${r.port} vers ce PC (${r.lan || '?'}). Ce n'est pas nécessaire pour jouer à plusieurs chez toi.`));
+      reach.append(el('div', 'muted small', 'Si Windows demande d\'autoriser « arcadia-room » sur le réseau, accepte.'));
+      const go = el('button', 'btn-white', '▶ Lancer Mario Kart');
+      go.onclick = async () => { go.disabled = true; const x = await arcadia.swnetPlay(g.id).catch(e => ({ ok: false, error: e.message })); go.disabled = false; if (x.ok) closeModal(); else toast(x.error, true); };
+      const stop = el('button', 'btn-ghost', 'Fermer le salon'); stop.onclick = async () => { await arcadia.swnetStop(); zone.replaceChildren(el('p', 'muted', 'Salon fermé.')); };
+      const btns = el('div', 'btn-row'); btns.append(copy, go, stop);
+      zone.replaceChildren(el('div', 'net-label', 'Ton code d\'invitation'), codeBox, btns, reach, tips('host'));
+    };
+    jb.onclick = () => {
+      const inp = el('input', 'net-input'); inp.placeholder = 'MK-XXXXXX-XXXXXX-XXXXXX-XXXXXX'; inp.spellcheck = false;
+      const go = el('button', 'btn-white', 'Rejoindre');
+      go.onclick = async () => {
+        if (!inp.value.trim()) { inp.focus(); return; }
+        go.disabled = true; const x = await arcadia.swnetPlay(g.id, inp.value.trim()).catch(e => ({ ok: false, error: e.message })); go.disabled = false;
+        if (x.ok) closeModal(); else toast(x.error, true);
+      };
+      inp.onkeydown = e => { if (e.key === 'Enter') go.click(); };
+      const btns = el('div', 'btn-row'); btns.append(inp, go);
+      zone.replaceChildren(el('div', 'net-label', 'Colle le code de ton ami'), btns, tips('join'));
+      setTimeout(() => inp.focus(), 50);
+    };
+  }, true);
+}
 // ------------------------------------------------------------ historique des mises à jour
 const CL_TAG = { add: ['Ajout', 'New'], change: ['Modif', 'Changed'], fix: ['Correctif', 'Fixed'] };
 function changelogEl(list) {
@@ -1631,13 +1717,15 @@ function whatsNew() {
     a.append(ok); c.append(a); setTimeout(() => ok.focus(), 50);
   }, true));
 }
+const UPDSCREEN = { onPct: null };
+arcadia.onUpdDownload(({ pct }) => UPDSCREEN.onPct && UPDSCREEN.onPct(pct));
 // Barre de chargement : à 50 % Arcadia lance l'installation et redémarre tout seul
-function updateScreen(version, run) {
+function updateScreen(version, run, online) {
   return new Promise(resolve => {
     document.querySelector('.upd-screen')?.remove();
     const wrap = el('div', 'upd-screen');
     const cv = document.createElement('canvas'); cv.width = innerWidth; cv.height = innerHeight;
-    const txt = el('div', 'upd-txt show'); txt.append(el('b', '', 'Mise à jour'), el('span', '', `Arcadia ${version} · redémarrage…`));
+    const txt = el('div', 'upd-txt show'); const sub = el('span', '', online ? `Téléchargement d'Arcadia ${version}…` : `Arcadia ${version} · redémarrage…`); txt.append(el('b', '', 'Mise à jour'), sub);
     const bar = el('div', 'upd-bar'); const fill = el('div', ''); bar.append(fill);
     const pct = el('div', 'upd-pct', '0 %'); txt.append(bar, pct);
     wrap.append(cv, txt); document.body.append(wrap);
@@ -1645,7 +1733,17 @@ function updateScreen(version, run) {
     const cells = []; for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) cells.push([x, y, Math.random() * .6 + (y / rows) * .4]);
     cells.sort((p1, p2) => p1[2] - p2[2]);
     const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#39e5c8';
-    let k = 0, drawn = 0, launched = false, target = .5;
+    let k = 0, drawn = 0, launched = false, target = online ? 0 : .5;
+    if (online) {
+      // la barre suit le vrai téléchargement (0 → 90 %), puis l'installation et le redémarrage
+      UPDSCREEN.onPct = pct => { target = Math.max(target, Math.min(.9, pct / 100 * .9)); if (pct >= 100) sub.textContent = `Arcadia ${version} · installation et redémarrage…`; };
+      launched = true; txt.classList.add('on');
+      (async () => {
+        const r = await run().catch(e => ({ ok: false, error: e.message }));
+        if (r && r.ok === false) { clearInterval(iv); wrap.remove(); toast(`Mise à jour impossible : ${r.error || ''}`, true); resolve(r); return; }
+        target = .99; resolve(r);
+      })();
+    }
     const paint = () => {
       const n = Math.floor(cells.length * Math.min(1, k * 1.6));
       for (let i = drawn; i < n; i++) { const [x, y] = cells[i]; ctx.fillStyle = Math.random() < .035 ? accent : '#07080b'; ctx.fillRect(x * px, y * px, px, px); }
@@ -1653,7 +1751,7 @@ function updateScreen(version, run) {
     };
     // minuterie (pas requestAnimationFrame : elle avance même si la fenêtre n'est pas au premier plan)
     const iv = setInterval(async () => {
-      k = Math.min(target, k + (k < .5 ? .5 / 75 : .004)); paint();
+      k = Math.min(target, k + (online ? Math.max(.002, (target - k) * .15) : (k < .5 ? .5 / 75 : .004))); paint();
       if (k >= .5 && !launched) {
         launched = true; txt.classList.add('on'); target = .97; // continue doucement pendant la fermeture
         const r = run ? await run().catch(e => ({ ok: false, error: e.message })) : { ok: true };
@@ -1719,13 +1817,6 @@ async function makeReport() {
   const r = await arcadia.makeReport().catch(e => ({ ok: false, error: e.message }));
   if (r.ok) toast(`Rapport créé sur ton Bureau (${r.count} journaux)`); else toast(`Rapport impossible : ${r.error}`, true);
 }
-// Téléchargement d'une nouvelle version depuis GitHub
-arcadia.onUpdDownload(({ version, pct }) => {
-  let p = document.querySelector('.upd-pill.dl');
-  if (!p) { p = el('div', 'upd-pill dl'); p.append(el('span', 'upd-dot'), el('span', 'upd-dl-txt', '')); document.body.append(p); }
-  p.querySelector('.upd-dl-txt').textContent = `Téléchargement d'Arcadia ${version} · ${pct} %`;
-  if (pct >= 100) setTimeout(() => p.remove(), 1500);
-});
 // Nouvelle version déposée pendant qu'Arcadia est ouvert : petite bannière, un clic pour relancer
 arcadia.onUpdate(u => {
   document.querySelectorAll('.upd-pill').forEach(x => x.remove());
@@ -1733,7 +1824,7 @@ arcadia.onUpdate(u => {
   const go = el('button', 'upd-go', 'Mettre à jour');
   const x = el('button', 'upd-x', '✕'); x.title = 'Plus tard';
   b.append(el('span', 'upd-dot'), el('span', '', `Une mise à jour est disponible · ${u.version}`), go, x);
-  go.onclick = () => { go.disabled = true; b.remove(); updateScreen(u.version, () => arcadia.installUpdate(u.file)); };
+  go.onclick = () => { go.disabled = true; b.remove(); if (u.online) updateScreen(u.version, () => arcadia.installOnline(), true); else updateScreen(u.version, () => arcadia.installUpdate(u.file)); };
   x.onclick = () => b.remove();
   document.body.append(b);
 });
@@ -2627,9 +2718,18 @@ async function biosGroup() {
     btn.onclick = async () => { const x = await arcadia.biosInstall(id); if (x.ok) { S = x.state; toast(x.message); SET.render(); } else if (x.error) toast(x.error, true); };
     r.append(td, btn); rows.push(r);
   }
+  const sw = el('div', 'tool');
+  const swd = el('div', 'td'); swd.append(el('b', '', 'Clés et firmware Switch'), el('div', '', 'prod.keys et firmware de ta propre Switch, installés dans tous les moteurs Switch.'));
+  const swb = el('div', 'btn-row');
+  for (const [what, lab] of [['keys', 'Clés…'], ['firmware', 'Firmware…']]) {
+    const b = el('button', 'btn-ghost', lab);
+    b.onclick = async () => { b.disabled = true; const x = await arcadia.switchInstall(what).catch(e => ({ ok: false, error: e.message })); b.disabled = false; if (x.ok) toast(x.message); else if (x.error) toast(x.error, true); };
+    swb.append(b);
+  }
+  sw.append(swd, swb); rows.unshift(sw);
   const fw = el('div', 'tool');
   const ftd = el('div', 'td'); ftd.append(el('b', '', 'Firmware PS3'), el('div', '', 'Logiciel système officiel de Sony, gratuit : Arcadia le télécharge et l\'installe dans le moteur PS3.'));
   const fb = el('button', 'btn-ghost', 'Installer…'); fb.onclick = () => { closeModal(); ps3FirmwareModal(null); };
   fw.append(ftd, fb); rows.push(fw);
-  return group('BIOS et firmware des consoles', rows, 'Ces fichiers appartiennent aux fabricants : Arcadia ne les fournit jamais. Les BIOS viennent de ta propre console.');
+  return group('BIOS et firmware des consoles', rows, 'Astuce : glisse tes clés, firmware ou BIOS directement dans la fenêtre d\'Arcadia, ils sont reconnus et installés tout seuls. Ces fichiers appartiennent aux fabricants : Arcadia ne les fournit jamais, ils viennent de ta propre console.');
 }

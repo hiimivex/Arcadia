@@ -38,6 +38,7 @@ struct App {
   // État
   bool running = true, paused = false, menuOpen = false, resumePrompt = false;
   double speed = 1.0; int speedMode = 0; // 0 normal, 1 turbo, 2 ralenti
+  bool rewinding = false, ffHeld = false; // rembobinage (R ou Guide + LT maintenus), avance rapide maintenue (Guide + RT)
   uint64_t startTicks = 0, playedNs = 0;
   float fps = 0; int fpsFrames = 0; uint64_t fpsT0 = 0;
   std::deque<Toast> toasts;

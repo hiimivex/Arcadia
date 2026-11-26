@@ -746,12 +746,16 @@ function installQuickUpdate(u) {
 // puis proposée comme une mise à jour posée à la main (bannière + écran de mise à jour).
 const GH_REPO = 'hiimivex/Arcadia';
 let ghBusy = false;
+// 1) vérification seule : une nouvelle release → bannière « Mise à jour disponible »
+// 2) quand le joueur accepte : téléchargement (progression), empreinte vérifiée, installation silencieuse, redémarrage
+let ghRelease = null, ghNotified = null;
 async function checkGithubUpdate(manual) {
-  if (ghBusy || !app.isPackaged || process.platform !== 'win32' || !ROOT) return { ok: false, error: 'indisponible' };
+  const TEST_API = process.env.ARCADIA_UPDATE_API; // essais uniquement
+  if (ghBusy || (!TEST_API && (!app.isPackaged || process.platform !== 'win32')) || !ROOT) return { ok: false, error: 'indisponible' };
   if (!manual && settings().autoUpdate === false) return { ok: false, error: 'désactivé' };
   ghBusy = true;
   try {
-    const r = await net.fetch(`https://api.github.com/repos/${GH_REPO}/releases/latest`, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Arcadia' } });
+    const r = await net.fetch(TEST_API || `https://api.github.com/repos/${GH_REPO}/releases/latest`, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Arcadia' } });
     if (r.status === 404) return { ok: true, latest: app.getVersion(), upToDate: true }; // aucune release publiée
     if (!r.ok) throw new Error(`GitHub HTTP ${r.status}`);
     const rel = await r.json();
@@ -759,36 +763,59 @@ async function checkGithubUpdate(manual) {
     if (!/^\d+\.\d+\.\d+$/.test(version) || verNum(version) <= verNum(app.getVersion())) return { ok: true, latest: version || app.getVersion(), upToDate: true };
     const asset = (rel.assets || []).find(a => new RegExp(`^Arcadia-Setup-${version.replace(/\./g, '\\.')}\\.exe$`, 'i').test(a.name));
     if (!asset) return { ok: false, error: `Version ${version} publiée sans installateur` };
-    const dir = path.join(ROOT, '_updates'); fs.mkdirSync(dir, { recursive: true });
-    const dest = path.join(dir, asset.name);
-    if (exists(dest) && fs.statSync(dest).size === asset.size) return { ok: true, version, ready: true };
-    log?.write('INFO', `mise à jour en ligne : téléchargement de ${asset.name}`);
-    win?.webContents.send('app:updDownload', { version, pct: 0 });
-    const d = await net.fetch(asset.browser_download_url, { headers: { 'User-Agent': 'Arcadia' } });
-    if (!d.ok || !d.body) throw new Error(`Téléchargement : HTTP ${d.status}`);
-    const part = dest + '.part', out = fs.createWriteStream(part), hash = require('crypto').createHash('sha256');
-    let got = 0, lastPct = -1;
-    const reader = d.body.getReader();
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const buf = Buffer.from(value); got += buf.length; hash.update(buf);
-      if (!out.write(buf)) await new Promise(res => out.once('drain', res));
-      const pct = Math.floor(got * 100 / (asset.size || 1));
-      if (pct !== lastPct && pct % 5 === 0) { lastPct = pct; win?.webContents.send('app:updDownload', { version, pct }); }
-    }
-    await new Promise((res, rej) => out.end(err => (err ? rej(err) : res())));
-    if (asset.size && got !== asset.size) { fs.rmSync(part, { force: true }); throw new Error('téléchargement incomplet'); }
-    const want = /^sha256:([0-9a-f]{64})$/i.exec(asset.digest || '');
-    if (want && want[1].toLowerCase() !== hash.digest('hex')) { fs.rmSync(part, { force: true }); throw new Error('empreinte sha256 différente : fichier rejeté'); }
-    fs.renameSync(part, dest);
-    log?.write('INFO', `mise à jour en ligne : ${asset.name} prêt`);
-    return { ok: true, version, ready: true };
+    ghRelease = { version, asset };
+    if (ghNotified !== version || manual) { ghNotified = version; win?.webContents.send('app:update', { version, online: true }); }
+    return { ok: true, version, available: true };
   } catch (e) {
     log?.write('INFO', `mise à jour en ligne : ${e.message}`);
     return { ok: false, error: e.message };
   } finally { ghBusy = false; }
 }
+async function downloadRelease() {
+  const { version, asset } = ghRelease || {};
+  if (!asset) throw new Error('Mise à jour introuvable');
+  const dir = path.join(ROOT, '_updates'); fs.mkdirSync(dir, { recursive: true });
+  const dest = path.join(dir, asset.name);
+  const send = pct => win?.webContents.send('app:updDownload', { version, pct });
+  if (exists(dest) && fs.statSync(dest).size === asset.size) { send(100); return dest; }
+  log?.write('INFO', `mise à jour en ligne : téléchargement de ${asset.name}`);
+  send(0);
+  const d = await net.fetch(asset.browser_download_url, { headers: { 'User-Agent': 'Arcadia' } });
+  if (!d.ok || !d.body) throw new Error(`Téléchargement : HTTP ${d.status}`);
+  const part = dest + '.part', out = fs.createWriteStream(part), hash = require('crypto').createHash('sha256');
+  let got = 0, last = -1;
+  const reader = d.body.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const buf = Buffer.from(value); got += buf.length; hash.update(buf);
+    if (!out.write(buf)) await new Promise(res => out.once('drain', res));
+    const pct = Math.floor(got * 100 / (asset.size || 1));
+    if (pct !== last) { last = pct; send(pct); }
+  }
+  await new Promise((res, rej) => out.end(err => (err ? rej(err) : res())));
+  if (asset.size && got !== asset.size) { fs.rmSync(part, { force: true }); throw new Error('téléchargement incomplet'); }
+  const want = /^sha256:([0-9a-f]{64})$/i.exec(asset.digest || '');
+  if (want && want[1].toLowerCase() !== hash.digest('hex')) { fs.rmSync(part, { force: true }); throw new Error('empreinte sha256 différente : fichier rejeté'); }
+  fs.renameSync(part, dest);
+  updNotified = version; // le dossier _updates ne redéclenche pas une deuxième bannière
+  return dest;
+}
+ipcMain.handle('app:installOnline', async () => {
+  try {
+    const file = await downloadRelease();
+    const exeDir = path.dirname(app.getPath('exe'));
+    const installDir = path.basename(exeDir).toLowerCase() === 'app' ? path.dirname(exeDir) : exeDir;
+    log?.write('INFO', `mise à jour en ligne : installation de ${path.basename(file)}`);
+    if (process.env.ARCADIA_UPDATE_API) return { ok: true, file }; // essais : pas d'installation
+    require('child_process').spawn(file, ['/S', `/D=${installDir}`], { detached: true, stdio: 'ignore' }).unref();
+    setTimeout(() => { app.quit(); setTimeout(() => app.exit(0), 2500); }, 300);
+    return { ok: true };
+  } catch (e) {
+    log?.write('INFO', `mise à jour en ligne : ${e.message}`);
+    return { ok: false, error: e.message };
+  }
+});
 ipcMain.handle('app:checkOnline', () => checkGithubUpdate(true));
 // Surveille l'arrivée d'une nouvelle version pendant qu'Arcadia est ouvert
 let updNotified = null;
@@ -957,12 +984,14 @@ async function ps3FirmwareUrl() {
   }
   return null;
 }
-ipcMain.handle('ps3:firmware', async (_e, mode) => {
+ipcMain.handle('ps3:firmware', (_e, mode) => ps3Firmware(mode));
+async function ps3Firmware(mode, given) {
   const exe = rpcs3Exe();
   if (!exe) return { ok: false, error: 'RPCS3 est introuvable dans le dossier des émulateurs.' };
   if (ps3FirmwareOk(exe)) return { ok: true, already: true };
-  let pup = null;
-  if (mode === 'pick') {
+  let pup = given || null;
+  if (given) mode = 'pick';
+  else if (mode === 'pick') {
     const res = await dialog.showOpenDialog(win, { title: 'Choisis PS3UPDAT.PUP', properties: ['openFile'], filters: [{ name: 'Firmware PS3', extensions: ['pup', 'PUP'] }] });
     if (res.canceled) return { ok: false, cancelled: true };
     pup = res.filePaths[0];
@@ -993,7 +1022,7 @@ ipcMain.handle('ps3:firmware', async (_e, mode) => {
   });
   if (mode !== 'pick') { try { fs.unlinkSync(pup); } catch { /* */ } }
   return ps3FirmwareOk(exe) ? { ok: true } : { ok: false, error: 'RPCS3 n\'a pas terminé l\'installation. Réessaie, ou installe-le depuis RPCS3 (Fichier → Installer le firmware).' };
-});
+}
 
 // Téléchargement avec progression (fichiers publics des constructeurs : firmware Sony, disque dur vierge de xemu)
 async function downloadTo(url, file, channel) {
@@ -1026,11 +1055,13 @@ function vitaFirmwareOk(exe) {
   if (!exe) return false;
   return [path.dirname(exe), path.join(app.getPath('appData'), 'Vita3K', 'Vita3K')].some(d => exists(path.join(d, 'os0')) && exists(path.join(d, 'vs0')));
 }
-ipcMain.handle('vita:firmware', async (_e, mode) => {
+ipcMain.handle('vita:firmware', (_e, mode) => vitaFirmware(mode));
+async function vitaFirmware(mode, given) {
   const exe = vitaExe();
   if (!exe) return { ok: false, error: 'Vita3K est introuvable dans le dossier des émulateurs.' };
-  let files = [];
-  if (mode === 'pick') {
+  let files = given || [];
+  if (given) mode = 'pick';
+  else if (mode === 'pick') {
     const res = await dialog.showOpenDialog(win, { title: 'Choisis PSVUPDAT.PUP (et PSP2UPDAT.PUP)', properties: ['openFile', 'multiSelections'], filters: [{ name: 'Firmware PS Vita', extensions: ['pup', 'PUP'] }] });
     if (res.canceled) return { ok: false, cancelled: true };
     files = res.filePaths;
@@ -1047,7 +1078,7 @@ ipcMain.handle('vita:firmware', async (_e, mode) => {
   }
   if (mode !== 'pick') for (const f of files) { try { fs.unlinkSync(f); } catch { /* */ } }
   return vitaFirmwareOk(exe) ? { ok: true } : { ok: false, error: 'Vita3K n\'a pas terminé l\'installation. Réessaie, ou installe-le depuis Vita3K (Fichier → Installer le firmware).' };
-});
+}
 // ---------------------------------------------------------------- Xbox (xemu) : BIOS + MCPX (de la console du joueur) + disque dur vierge (fourni par xemu)
 const XEMU_HDD = 'https://github.com/xemu-project/xemu-hdd-image/releases/latest/download/xbox_hdd.qcow2.zip';
 function xemuToml(exe) {
@@ -1059,7 +1090,8 @@ function xemuNeeds(exe) {
   const get = k => { const m = new RegExp(`^\\s*${k}\\s*=\\s*['"](.*)['"]`, 'm').exec(t); return m ? m[1].replace(/\\\\/g, '\\') : ''; };
   return { mcpx: !exists(get('bootrom_path')), bios: !exists(get('flashrom_path')), hdd: !exists(get('hdd_path')) };
 }
-ipcMain.handle('xbox:install', async (_e, what) => {
+ipcMain.handle('xbox:install', (_e, what) => xboxInstall(what));
+async function xboxInstall(what, given) {
   const exe = Object.values(store.get('mapping') || {}).find(x => x.emulator === 'xemu' && exists(x.exe))?.exe
     || [EMU_DIR(), store.get('emulatorsDir')].filter(exists).map(d => detectEmulators(d).xemu).find(Boolean);
   if (!exe) return { ok: false, error: 'xemu est introuvable dans le dossier des émulateurs.' };
@@ -1078,22 +1110,30 @@ ipcMain.handle('xbox:install', async (_e, what) => {
   const spec = { mcpx: { title: 'Choisis ta ROM MCPX (512 octets)', sizes: [512], key: 'bootrom_path', name: 'mcpx_1.0.bin' },
                  bios: { title: 'Choisis ton BIOS Xbox (256 Ko ou 1 Mo)', sizes: [262144, 1048576], key: 'flashrom_path', name: 'bios.bin' } }[what];
   if (!spec) return { ok: false, error: 'Fichier inconnu' };
-  const res = await dialog.showOpenDialog(win, { title: spec.title, properties: ['openFile'], filters: [{ name: 'ROM', extensions: ['bin', 'rom'] }, { name: 'Tous les fichiers', extensions: ['*'] }] });
-  if (res.canceled) return { ok: false, cancelled: true };
-  const src = res.filePaths[0];
+  let src = given;
+  if (!src) {
+    const res = await dialog.showOpenDialog(win, { title: spec.title, properties: ['openFile'], filters: [{ name: 'ROM', extensions: ['bin', 'rom'] }, { name: 'Tous les fichiers', extensions: ['*'] }] });
+    if (res.canceled) return { ok: false, cancelled: true };
+    src = res.filePaths[0];
+  }
   if (!spec.sizes.includes(fs.statSync(src).size)) return { ok: false, error: `Ce fichier n'a pas la bonne taille pour un ${what === 'mcpx' ? 'MCPX' : 'BIOS Xbox'}.` };
   const dst = path.join(dir, spec.name); fs.copyFileSync(src, dst); setKey(spec.key, dst);
   return { ok: true, message: (what === 'mcpx' ? 'MCPX' : 'BIOS Xbox') + ' installé', need: xemuNeeds(exe) };
-});
+}
 
 // Installe le BIOS que l'utilisateur a extrait de SA console (copie dans le dossier système du moteur)
-ipcMain.handle('bios:install', async (_e, id) => {
+ipcMain.handle('bios:install', (_e, id) => biosInstall(id));
+async function biosInstall(id, given) {
   const b = BIOS[id]; if (!b) return { ok: false, error: 'Console inconnue' };
-  const res = await dialog.showOpenDialog(win, { title: `Choisis ton ${b.label}`, properties: ['openFile', 'multiSelections'], filters: [{ name: 'BIOS', extensions: ['bin', 'rom', 'rom0'] }, { name: 'Tous les fichiers', extensions: ['*'] }] });
-  if (res.canceled) return { ok: false, cancelled: true };
+  let files = given;
+  if (!files) {
+    const res = await dialog.showOpenDialog(win, { title: `Choisis ton ${b.label}`, properties: ['openFile', 'multiSelections'], filters: [{ name: 'BIOS', extensions: ['bin', 'rom', 'rom0'] }, { name: 'Tous les fichiers', extensions: ['*'] }] });
+    if (res.canceled) return { ok: false, cancelled: true };
+    files = res.filePaths;
+  }
   const dst = path.join(runnerSystem(), b.dir); fs.mkdirSync(dst, { recursive: true });
   let n = 0; const bad = [];
-  for (const f of res.filePaths) {
+  for (const f of files) {
     let name = path.basename(f); const size = fs.statSync(f).size;
     if (!b.size.includes(size) || !/\.(bin|rom0?)$/i.test(name)) { bad.push(name); continue; }
     if (!b.test(name)) { if (!b.rename) { bad.push(name); continue; } name = b.rename; } // le cœur cherche un nom précis
@@ -1103,7 +1143,7 @@ ipcMain.handle('bios:install', async (_e, id) => {
   }
   if (!n) return { ok: false, error: `Ce fichier ne ressemble pas à un ${b.label}${bad.length ? ` (${bad.join(', ')})` : ''}.` };
   return { ok: true, message: `${n} fichier(s) BIOS installé(s).`, state: snapshot() };
-});
+}
 function runnerData() {
   const emu = EMU_DIR();
   return emu ? path.join(emu, 'Arcadia') : path.join(app.getPath('userData'), 'runner');
@@ -1383,14 +1423,18 @@ ipcMain.handle('switch:need', () => {
   const n = switchNeeds(setup);
   return n.keys || n.firmware ? { keys: n.keys, firmware: n.firmware } : null;
 });
-ipcMain.handle('switch:install', async (_e, what) => {
+ipcMain.handle('switch:install', (_e, what) => switchInstall(what));
+async function switchInstall(what, given) {
   const targets = switchTargets();
   if (!targets.length) return { ok: false, error: 'Aucun émulateur Switch installé.' };
   try {
     if (what === 'keys') {
-      const res = await dialog.showOpenDialog(win, { title: 'Choisis ton prod.keys', properties: ['openFile'], filters: [{ name: 'Clés Switch', extensions: ['keys'] }] });
-      if (res.canceled) return { ok: false };
-      const src = res.filePaths[0];
+      let src = given;
+      if (!src) {
+        const res = await dialog.showOpenDialog(win, { title: 'Choisis ton prod.keys', properties: ['openFile'], filters: [{ name: 'Clés Switch', extensions: ['keys'] }] });
+        if (res.canceled) return { ok: false };
+        src = res.filePaths[0];
+      }
       if (!/^\s*header_key\s*=/m.test(fs.readFileSync(src, 'utf8'))) return { ok: false, error: 'Ce fichier ne contient pas de header_key : ce n\'est pas un prod.keys valide.' };
       for (const t of targets) {
         fs.mkdirSync(path.join(t, 'keys'), { recursive: true });
@@ -1400,9 +1444,12 @@ ipcMain.handle('switch:install', async (_e, what) => {
       return { ok: true, message: `Clés installées pour ${targets.length} émulateur(s) Switch.` };
     }
     if (what === 'firmware') {
-      const res = await dialog.showOpenDialog(win, { title: 'Choisis ton firmware (.zip ou dossier de .nca)', properties: ['openFile', 'openDirectory'], filters: [{ name: 'Firmware', extensions: ['zip', '7z'] }] });
-      if (res.canceled) return { ok: false };
-      let srcDir = res.filePaths[0], tmp = null;
+      let srcDir = given, tmp = null;
+      if (!srcDir) {
+        const res = await dialog.showOpenDialog(win, { title: 'Choisis ton firmware (.zip ou dossier de .nca)', properties: ['openFile', 'openDirectory'], filters: [{ name: 'Firmware', extensions: ['zip', '7z'] }] });
+        if (res.canceled) return { ok: false };
+        srcDir = res.filePaths[0];
+      }
       if (!fs.statSync(srcDir).isDirectory()) {
         tmp = path.join(app.getPath('temp'), 'arcadia-firmware');
         fs.rmSync(tmp, { recursive: true, force: true });
@@ -1422,7 +1469,7 @@ ipcMain.handle('switch:install', async (_e, what) => {
     }
     return { ok: false, error: 'Action inconnue' };
   } catch (e) { return { ok: false, error: e.message }; }
-});
+}
 
 // ---------------------------------------------------------------- menu Arcadia par-dessus un émulateur externe
 // Échap, Guide ou Back+Start bref : le jeu est mis en pause (processus suspendu) et le menu Arcadia s'affiche.
@@ -1929,12 +1976,14 @@ function startGame(id, opts = {}) {
       const need = switchNeeds(setup);
       if (need.keys || need.firmware) return { ok: false, needSwitch: { ...need, emulator: KNOWN_EMULATORS[setup.emulator]?.name || setup.emulator }, error: need.keys ? 'Clés Switch (prod.keys) manquantes.' : 'Firmware Switch manquant.' };
       swDir = need.dir;
+      if (settings().switchProfile) { try { setSwitchProfileName(need.dir, settings().switchProfile); } catch (e) { log?.write('INFO', `profil Switch : ${e.message}`); } }
       const gsx = (store.get('gameSettings') || {})[id] || {};
       const asw = settings().switchEngine !== 'eden' && gsx.fallback !== app.getVersion() ? arcadiaSwitchExe() : null; // Switch 1 et 2
+      if (opts.switchArgs && !asw) return { ok: false, error: 'Le multijoueur en ligne passe par le moteur Switch d\'Arcadia : remets « Moteur Switch » sur Arcadia dans les Paramètres.' };
       if (asw) {
         const guid = (settings().input || {}).guid || '';
         try { SwitchCfg.prepare(need.dir, { opts: { ...Langs.switchOpts(gameLang(g)), ...swEngineOpts(id) }, arcadia: true }); } catch (e) { log?.write('INFO', `réglages Switch : ${e.message}`); }
-        engine = { exe: asw, args: KNOWN_EMULATORS.edencli.args, env: { ARCADIA: '1', ARCADIA_USER_DIR: need.dir, ARCADIA_TITLE: `${decorate(g).title} — Arcadia`, ARCADIA_PAD_DB: exists(padDbPath()) ? padDbPath() : '', ARCADIA_PAD_GUID: guid, ARCADIA_CONTROLS: controlsFile(g.console), ARCADIA_STATS: statsFile(), ARCADIA_LIVE: path.join(need.dir, 'arcadia-live.ini'), ARCADIA_MOUSE: extOpts(id)['Arcadia/mouse'] || 'camera' } };
+        engine = { exe: asw, args: (opts.switchArgs ? opts.switchArgs + ' ' : '') + KNOWN_EMULATORS.edencli.args, env: { ARCADIA: '1', ARCADIA_USER_DIR: need.dir, ARCADIA_TITLE: `${decorate(g).title} — Arcadia`, ARCADIA_PAD_DB: exists(padDbPath()) ? padDbPath() : '', ARCADIA_PAD_GUID: guid, ARCADIA_CONTROLS: controlsFile(g.console), ARCADIA_STATS: statsFile(), ARCADIA_LIVE: path.join(need.dir, 'arcadia-live.ini'), ARCADIA_MOUSE: extOpts(id)['Arcadia/mouse'] || 'camera' } };
         log?.write('INFO', 'moteur Switch d\'Arcadia');
       } else if (setup.emulator !== 'lichii') {
         const inp = settings().input || {}, guid = inp.guid || '';
@@ -2235,6 +2284,116 @@ ipcMain.handle('game:playMulti', async (_e, id, o) => {
   return { ok: false, error: 'Ce type de multijoueur n\'est pas encore branché.' };
 });
 
+// Profil de joueur des jeux Switch : Eden crée un profil « Eden » ; Arcadia le renomme avec le nom choisi
+// (seul le nom change : l'identifiant du profil, donc les sauvegardes, reste le même).
+const PROFILE_REL = path.join('nand', 'system', 'save', '8000000000000010', 'su', 'avators', 'profiles.dat');
+function cleanProfileName(n) { return String(n || '').replace(/[\u0000-\u001f]/g, '').trim().slice(0, 10); }
+function setSwitchProfileName(dir, name) {
+  name = cleanProfileName(name); if (!name || !dir) return false;
+  const file = path.join(dir, PROFILE_REL);
+  let buf = null; try { buf = fs.readFileSync(file); } catch { /* pas encore créé */ }
+  const nameBytes = () => { const b = Buffer.alloc(0x20); let s = Buffer.from(name, 'utf8'); while (s.length > 0x1f) { name = name.slice(0, -1); s = Buffer.from(name, 'utf8'); } s.copy(b); return b; };
+  if (!buf || buf.length < 0x650) {
+    buf = Buffer.alloc(0x650);
+    const uuid = crypto.randomBytes(16); const o = 0x10;
+    uuid.copy(buf, o); uuid.copy(buf, o + 0x10);
+    buf.writeBigUInt64LE(BigInt(Math.floor(Date.now() / 1000)), o + 0x20);
+    nameBytes().copy(buf, o + 0x28);
+  } else {
+    let done = false;
+    for (let i = 0; i < 8 && !done; i++) {
+      const o = 0x10 + i * 0xC8;
+      if (buf.subarray(o, o + 16).every(b => b === 0)) continue;
+      const cur = buf.subarray(o + 0x28, o + 0x48).toString('utf8').replace(/\0.*$/s, '');
+      if (cur === name) return true;
+      nameBytes().copy(buf, o + 0x28); done = true; // premier profil = celui que lancent les jeux
+    }
+    if (!done) return false;
+  }
+  fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, buf);
+  return true;
+}
+ipcMain.handle('switch:profileName', (_e, name) => {
+  const n = cleanProfileName(name);
+  store.data.settings = { ...settings(), switchProfile: n }; store.save();
+  let ok = 0; for (const d of switchTargets()) { try { if (setSwitchProfileName(d, n)) ok++; } catch (e) { log?.write('INFO', `profil Switch : ${e.message}`); } }
+  return { ok: true, name: n, count: ok, state: snapshot() };
+});
+
+// ---------------------------------------------------------------- Switch en ligne entre amis (salon privé, gratuit, sans serveur)
+// L'hôte lance le salon du moteur Switch (arcadia-room) sur son PC et ouvre le port de sa box (UPnP) ;
+// ses amis le rejoignent avec un code d'invitation. Dans le jeu : mode « Sans fil local ».
+const Invite = require('./src/invite');
+const UPnP = require('./src/upnp');
+const SW_ROOM_PORT = 24872;
+const SWNET = { room: null, port: SW_ROOM_PORT, password: null, code: null, upnp: null, gameId: null };
+const MK8D = '0100152000022000';
+function aswRoomExe() { const e = path.join(runnerDir(), 'switch', process.platform === 'win32' ? 'arcadia-room.exe' : 'arcadia-room'); return exists(e) ? e : null; }
+function netName() {
+  const raw = settings().switchProfile || settings().netName || require('os').userInfo().username || 'Joueur';
+  let n = raw.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9._ -]/g, '').trim().slice(0, 14) || 'Joueur';
+  while (n.length < 4) n += '_';
+  return `${n}-${Math.floor(10 + Math.random() * 90)}`; // deux joueurs avec le même nom ne sont pas refusés
+}
+const isPrivateIp = ip => /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(ip);
+function mainLanIp() { const l = lanAddrs(); return l.find(isPrivateIp) || l[0] || null; }
+function swnetStop() {
+  if (SWNET.room) { try { SWNET.room.kill(); } catch { /* déjà arrêté */ } SWNET.room = null; }
+  if (SWNET.upnp?.close) SWNET.upnp.close();
+  SWNET.upnp = null; SWNET.code = null; SWNET.gameId = null;
+}
+app.on('will-quit', swnetStop);
+// 1) ouvrir le salon et préparer le code (le jeu n'est pas encore lancé)
+ipcMain.handle('swnet:host', async (_e, id) => {
+  const g = games.find(x => x.id === id);
+  if (!g) return { ok: false, error: 'Jeu introuvable.' };
+  const exe = aswRoomExe();
+  if (!exe) return { ok: false, error: 'Le serveur de salon du moteur Switch (arcadia-room.exe) est introuvable : réinstalle Arcadia.' };
+  swnetStop();
+  const title = decorate(g).title, tid = String(decorate(g).titleId || titleIdFrom(g.file) || MK8D);
+  SWNET.password = Invite.newPassword();
+  const ban = path.join(app.getPath('userData'), 'salon-bans.json');
+  const args = ['--room-name', `Arcadia · ${title}`.slice(0, 60), '--port', String(SWNET.port), '--max-members', '8', '--password', SWNET.password,
+    '--preferred-game', title, '--preferred-game-id', tid, '--ban-list-file', ban];
+  const child = require('child_process').spawn(exe, args, { cwd: path.dirname(exe), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+  let out = '';
+  child.stdout.on('data', d => { out += d; }); child.stderr.on('data', d => { out += d; });
+  child.on('exit', code => { if (SWNET.room === child) { SWNET.room = null; log?.write('MULTI', `salon Switch fermé (code ${code}) ${out.slice(-300)}`); } });
+  child.on('error', e => log?.write('MULTI', `salon Switch : ${e.message}`));
+  SWNET.room = child; SWNET.gameId = id;
+  await new Promise(r => setTimeout(r, 1200));
+  if (!SWNET.room) return { ok: false, error: `Le salon n'a pas pu s'ouvrir (port ${SWNET.port} déjà pris ?).` };
+  const lan = mainLanIp();
+  SWNET.upnp = lan ? await UPnP.openPort({ fetch: (u, o) => net.fetch(u, o), port: SWNET.port, protocol: 'UDP', localIp: lan, description: 'Arcadia - salon Switch' }) : { ok: false, error: 'pas de réseau local' };
+  const pub = (SWNET.upnp.ok && SWNET.upnp.externalIp && !isPrivateIp(SWNET.upnp.externalIp) ? SWNET.upnp.externalIp : null) || await publicIp();
+  SWNET.code = Invite.encode({ publicIp: pub, lanIp: lan, port: SWNET.port, password: SWNET.password });
+  log?.write('MULTI', `salon Switch ouvert pour ${title} · LAN ${lan} · public ${pub} · UPnP ${SWNET.upnp.ok ? 'ok' : SWNET.upnp.error}`);
+  return { ok: true, code: SWNET.code, lan, public: pub, upnp: SWNET.upnp.ok, upnpError: SWNET.upnp.ok ? null : SWNET.upnp.error, port: SWNET.port };
+});
+ipcMain.handle('swnet:stop', () => { swnetStop(); return { ok: true }; });
+// 2) lancer le jeu de l'hôte (connecté à son propre salon) ou d'un ami (code d'invitation)
+ipcMain.handle('swnet:play', async (_e, id, code) => {
+  let addr, port, password;
+  if (code) {
+    const inv = Invite.decode(code);
+    if (!inv) return { ok: false, error: 'Code d\'invitation invalide : vérifie qu\'il est complet.' };
+    const mine = lanAddrs();
+    const sameLan = inv.lanIp && mine.some(ip => ip.split('.').slice(0, 3).join('.') === inv.lanIp.split('.').slice(0, 3).join('.'));
+    const sameHome = inv.publicIp && (await publicIp()) === inv.publicIp;
+    addr = (sameLan || sameHome || !inv.publicIp) ? inv.lanIp : inv.publicIp;
+    port = inv.port; password = inv.password;
+    if (!addr) return { ok: false, error: 'Ce code ne contient pas d\'adresse joignable.' };
+  } else {
+    if (!SWNET.room || SWNET.gameId !== id) return { ok: false, error: 'Le salon est fermé : héberge à nouveau.' };
+    addr = '127.0.0.1'; port = SWNET.port; password = SWNET.password;
+  }
+  const host = !code;
+  log?.write('MULTI', `Switch en ligne : ${host ? 'hôte' : 'invité'} → ${addr}:${port}`);
+  const r = startGame(id, { skipResume: true, switchArgs: `-m "${netName()}:${password}@${addr}:${port}"`, onExit: host ? swnetStop : null });
+  if (!r.ok && host) swnetStop();
+  return r;
+});
+
 // ---------------------------------------------------------------- IPC : 1.5
 ipcMain.handle('app:log', (_e, level, msg) => log?.write(level, String(msg).slice(0, 4000)));
 ipcMain.handle('app:openLog', () => shell.openPath(log.file));
@@ -2421,6 +2580,79 @@ ipcMain.handle('import:answer', (_e, askId, consoleId) => {
   if (w) { askWaiters.delete(askId); w(consoleId); }
 });
 
+// ---------------------------------------------------------------- glisser-déposer : clés, firmware et BIOS triés et installés tout seuls
+// Ce qui n'est pas un fichier système repart vers l'importation des jeux.
+const SYS_ARCHIVE = /\.(zip|7z|rar)$/i;
+function walkFiles(dir, depth = 3, out = []) {
+  let list = []; try { list = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out; }
+  for (const e of list) {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) { if (depth > 0) walkFiles(p, depth - 1, out); } else out.push(p);
+    if (out.length > 5000) break;
+  }
+  return out;
+}
+function isProdKeys(f) {
+  if (!/\.keys$/i.test(f)) return false;
+  try { return fs.statSync(f).size < 1024 * 1024 && /^\s*header_key\s*=/m.test(fs.readFileSync(f, 'utf8')); } catch { return false; }
+}
+function classifyBios(f) {
+  const n = path.basename(f).toLowerCase(); let size = 0;
+  try { size = fs.statSync(f).size; } catch { return null; }
+  if (!/\.(bin|rom0?)$/.test(n)) return null;
+  if (size === 524288 && /^(scph|ps1_rom|psx|ps-)/.test(n)) return { kind: 'bios', id: 'PS1' };
+  if ((size === 4194304 || size === 8388608) && /scph|ps2|bios|rom0/.test(n)) return { kind: 'bios', id: 'PS2' };
+  if (n === 'dc_boot.bin' && size === 2097152) return { kind: 'bios', id: 'DREAMCAST' };
+  if (size === 512 && /mcpx/.test(n)) return { kind: 'xbox', what: 'mcpx' };
+  if ((size === 262144 || size === 1048576) && /xbox|complex|evox|cromwell|bios/.test(n)) return { kind: 'xbox', what: 'bios' };
+  return null;
+}
+async function systemDrop(paths) {
+  const done = [], errors = [], rest = [];
+  const keys = [], fwDirs = [], fwZips = [], looseNca = [], ps3 = [], vita = [], bios = {}, xbox = [];
+  for (const p of paths) {
+    let st; try { st = fs.statSync(p); } catch { rest.push(p); continue; }
+    if (st.isDirectory()) {
+      const files = walkFiles(p);
+      const ncas = files.filter(f => /\.nca$/i.test(f));
+      const k = files.filter(isProdKeys);
+      const pups = files.filter(f => /\.pup$/i.test(f));
+      const bs = files.map(f => [f, classifyBios(f)]).filter(x => x[1]);
+      if (ncas.length >= 20) fwDirs.push(p);
+      keys.push(...k);
+      for (const f of pups) (/^ps3updat/i.test(path.basename(f)) ? ps3 : vita).push(f);
+      for (const [f, c] of bs) c.kind === 'bios' ? (bios[c.id] = bios[c.id] || []).push(f) : xbox.push([c.what, f]);
+      if (ncas.length < 20) rest.push(p); // dossier de jeux : importé en plus (les fichiers système en sont écartés)
+      continue;
+    }
+    const name = path.basename(p);
+    if (isProdKeys(p)) { keys.push(p); continue; }
+    if (/^title\.keys$/i.test(name)) continue; // copié avec prod.keys s'il est à côté
+    if (/\.nca$/i.test(name)) { looseNca.push(p); continue; }
+    if (/^ps3updat\.pup$/i.test(name)) { ps3.push(p); continue; }
+    if (/^(psvupdat|psp2updat)\.pup$/i.test(name)) { vita.push(p); continue; }
+    const b = classifyBios(p);
+    if (b) { b.kind === 'bios' ? (bios[b.id] = bios[b.id] || []).push(p) : xbox.push([b.what, p]); continue; }
+    if (/\.zip$/i.test(name)) { const names = require('./src/ziplite').zipNames(p); if (names && names.filter(n => /\.nca$/i.test(n)).length >= 20) { fwZips.push(p); continue; } }
+    if (SYS_ARCHIVE.test(name) && /firmware|\bfw\b/i.test(name)) { fwZips.push(p); continue; }
+    rest.push(p);
+  }
+  const run = async (label, fn) => { try { const r = await fn(); if (r && r.ok) done.push(r.message || `${label} : installé`); else if (r && r.error) errors.push(`${label} : ${r.error}`); } catch (e) { errors.push(`${label} : ${e.message}`); } };
+  if (keys.length) await run('Clés Switch', () => switchInstall('keys', keys[0]));
+  if (looseNca.length >= 20) {
+    const tmp = path.join(app.getPath('temp'), 'arcadia-fw-drop'); fs.rmSync(tmp, { recursive: true, force: true }); fs.mkdirSync(tmp, { recursive: true });
+    for (const f of looseNca) fs.copyFileSync(f, path.join(tmp, path.basename(f)));
+    fwDirs.push(tmp);
+  } else rest.push(...looseNca);
+  for (const d of [...fwDirs, ...fwZips].slice(0, 1)) await run('Firmware Switch', () => switchInstall('firmware', d));
+  if (ps3.length) await run('Firmware PS3', async () => { const r = await ps3Firmware('pick', ps3[0]); return r.ok ? { ok: true, message: r.already ? 'Firmware PS3 déjà installé' : 'Firmware PS3 installé' } : r; });
+  if (vita.length) await run('Firmware PS Vita', async () => { const r = await vitaFirmware('pick', vita); return r.ok ? { ok: true, message: 'Firmware PS Vita installé' } : r; });
+  for (const [id, files] of Object.entries(bios)) await run(`BIOS ${id === 'DREAMCAST' ? 'Dreamcast' : id}`, async () => { const r = await biosInstall(id, files); return r.ok ? { ok: true, message: `BIOS ${id === 'DREAMCAST' ? 'Dreamcast' : id} installé` } : r; });
+  for (const [what, f] of xbox) await run(what === 'mcpx' ? 'MCPX Xbox' : 'BIOS Xbox', () => xboxInstall(what, f));
+  if (done.length || errors.length) log?.write('INFO', `glisser-déposer système : ${[...done, ...errors].join(' | ')}`);
+  return { done, errors, rest, state: done.length ? snapshot() : null };
+}
+ipcMain.handle('system:drop', (_e, paths) => systemDrop(Array.isArray(paths) ? paths : []));
 ipcMain.handle('import:paths', (_e, paths) => runImport(paths));
 async function runImport(paths) {
   const lib = store.get('libraryDir');

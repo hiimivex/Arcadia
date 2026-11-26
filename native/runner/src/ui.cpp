@@ -24,7 +24,7 @@ static void focusPrev() { ImGuiWindow* w = ImGui::GetCurrentWindow(); ImGui::Foc
 static bool HOV() { return mouseActive && ImGui::IsItemHovered(); }
 
 enum { SEC_RESUME, SEC_SAVES, SEC_IMAGE, SEC_SOUND, SEC_PAD, SEC_ADV, SEC_CHEAT, SEC_RESTART, SEC_QUIT, SEC_COUNT };
-static const char* kSecLabel[SEC_COUNT] = { "Reprendre", "Sauvegardes", "Vidéo", "Son", "Contrôles", "Avancé", "Cheat", "Redémarrer", "Quitter le jeu" };
+static const char* kSecLabel[SEC_COUNT] = { "Reprendre", "Sauvegardes", "Vidéo", "Son", "Contrôles", "Avancé", "Rembobinage", "Redémarrer", "Quitter le jeu" };
 static const char* kSecIcon[SEC_COUNT]  = { "\xE2\x96\xB6", "\xE2\x97\x86", "\xE2\x97\x90", "\xE2\x99\xAA", "\xE2\x9C\xA6", "\xE2\x89\xA1", "\xE2\x98\x85", "\xE2\x86\xBB", "\xE2\x9C\x95" };
 
 static ImU32 W(float a) { return IM_COL32(255, 255, 255, (int)(255 * std::clamp(a, 0.f, 1.f))); }
@@ -328,7 +328,7 @@ static void secPad() {
   std::vector<std::pair<std::string, std::string>> items = {
     { "Échap · F5 · F8 · F12 · Tab", "Menu · sauver · charger · capture · turbo" }, { "Souris", "Écran tactile (DS, 3DS)" },
     { "Guide", "Ouvrir / fermer ce menu" }, { "Back + Start (maintenus)", "Quitter le jeu" },
-    { "Guide + RB", "Turbo \xC3\x97" "2" }, { "Guide + Back", "Ralenti \xC3\x97" "0,5" }, { "Guide + X", "Sauvegarder maintenant" },
+    { "Guide + RB", "Turbo \xC3\x97" "2" }, { "R / Guide + LT", "Rembobinage (maintenu)" }, { "Guide + RT", "Avance rapide \xC3\x97" "3 (maintenu)" }, { "Guide + Back", "Ralenti \xC3\x97" "0,5" }, { "Guide + X", "Sauvegarder maintenant" },
     { "Guide + Y", "Capture d'écran" }, { "Guide + LB", "Filtre net / lisse" }, { "Guide + \xE2\x86\x91 / \xE2\x86\x93", "Volume" }, { "Guide + \xE2\x86\x92", "Couper le son" },
     { "Stick droit (DS)", "Curseur de l'écran tactile · clic du stick = toucher" } };
   for (auto& s2 : items) {
@@ -378,7 +378,12 @@ static void secAdvanced() {
 }
 
 static void secCheat() {
-  heading("Cheat", "Rembobinage, codes de triche… on s'y amusera plus tard.");
+  heading("Rembobinage", "Reviens quelques secondes en arrière quand tu rates un saut, et avance plus vite dans les passages lents.");
+  bool on = g_app.cfg.getb("rewind", true);
+  if (toggleRow("rw", "Rembobinage", on)) { g_app.cfg.setb("rewind", on); if (!on) { extern void rewindReset(); rewindReset(); } }
+  ImDrawList* dl = ImGui::GetWindowDrawList();
+  const char* lines[] = { "Clavier : maintiens R pour revenir en arrière", "Manette : maintiens Guide + LT pour revenir en arrière", "Manette : maintiens Guide + RT pour avancer ×3", "Tab ou Guide + RB : turbo ×2 (bascule)" };
+  for (const char* l : lines) { ImVec2 p = ImGui::GetCursorScreenPos(); text(dl, fReg, 19, ImVec2(p.x + 4 * S, p.y), W(.6f), l); ImGui::Dummy(ImVec2(0, 30 * S)); }
 }
 
 // ───────────────────────── Fenêtres ─────────────────────────

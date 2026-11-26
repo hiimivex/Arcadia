@@ -69,4 +69,26 @@ function readZip(file) {
   return out;
 }
 
-module.exports = { writeZip, readZip, crc32 };
+// Noms des fichiers d'un .zip sans le charger en mémoire (lit seulement le répertoire central) ; null si illisible
+function zipNames(file) {
+  let fd;
+  try {
+    fd = fs.openSync(file, 'r');
+    const size = fs.fstatSync(fd).size, tail = Math.min(size, 65557);
+    const end = Buffer.alloc(tail); fs.readSync(fd, end, 0, tail, size - tail);
+    let e = tail - 22; while (e >= 0 && end.readUInt32LE(e) !== 0x06054b50) e--;
+    if (e < 0) return null;
+    const count = end.readUInt16LE(e + 10), cdSize = end.readUInt32LE(e + 12), cdOff = end.readUInt32LE(e + 16);
+    if (cdOff === 0xffffffff || cdSize > 64 * 1024 * 1024) return null; // zip64 : pas un firmware
+    const cd = Buffer.alloc(cdSize); fs.readSync(fd, cd, 0, cdSize, cdOff);
+    const names = []; let p = 0;
+    for (let i = 0; i < count && p + 46 <= cd.length; i++) {
+      if (cd.readUInt32LE(p) !== 0x02014b50) break;
+      const nlen = cd.readUInt16LE(p + 28), xlen = cd.readUInt16LE(p + 30), clen = cd.readUInt16LE(p + 32);
+      names.push(cd.toString('utf8', p + 46, p + 46 + nlen)); p += 46 + nlen + xlen + clen;
+    }
+    return names;
+  } catch { return null; } finally { if (fd !== undefined) try { fs.closeSync(fd); } catch { /* */ } }
+}
+
+module.exports = { writeZip, readZip, zipNames, crc32 };

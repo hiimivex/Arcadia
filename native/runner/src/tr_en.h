@@ -5,6 +5,18 @@
 #include <cstdlib>
 #include <cstring>
 static const char* const TR_EX[][2] = {
+  {"Rembobinage", "Rewind"},
+  {"Reviens quelques secondes en arrière quand tu rates un saut, et avance plus vite dans les passages lents.", "Go back a few seconds when you miss a jump, and speed through slow parts."},
+  {"Clavier : maintiens R pour revenir en arrière", "Keyboard: hold R to rewind"},
+  {"Manette : maintiens Guide + LT pour revenir en arrière", "Controller: hold Guide + LT to rewind"},
+  {"Manette : maintiens Guide + RT pour avancer ×3", "Controller: hold Guide + RT to fast-forward ×3"},
+  {"Tab ou Guide + RB : turbo ×2 (bascule)", "Tab or Guide + RB: turbo ×2 (toggle)"},
+  {"R / Guide + LT", "R / Guide + LT"},
+  {"Rembobinage (maintenu)", "Rewind (hold)"},
+  {"Avance rapide \xC3\x97" "3 (maintenu)", "Fast-forward ×3 (hold)"},
+  {"Rien à rembobiner pour l'instant", "Nothing to rewind yet"},
+  {"\xE2\x97\x80\xE2\x97\x80 Rembobinage", "◀◀ Rewind"},
+  {"\xE2\x96\xB6\xE2\x96\xB6 Avance rapide \xC3\x97" "3", "▶▶ Fast-forward ×3"},
   {"+ Sauvegarder ici", "+ Save here"},
   {"Activé", "On"},
   {"Afficher les performances", "Show performance"},

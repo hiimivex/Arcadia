@@ -121,7 +121,7 @@ html.bg-custom .hero::after { background: none; }
 .upd-txt b { font: 700 34px 'Space Grotesk', sans-serif; letter-spacing: .3em; text-transform: uppercase; color: #e9f1f0; }
 .upd-txt span { font: 600 12px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--accent); }
 .upd-bar { width: 260px; height: 4px; background: #16201f; margin-top: 8px; }
-.upd-bar > div { height: 100%; width: 0; background: var(--accent); box-shadow: 0 0 12px var(--accent); transition: width .1s linear; }
+.upd-bar > div { height: 100%; width: 0; background: var(--accent); box-shadow: 0 0 12px var(--accent); }
 .upd-pct { font: 600 11px var(--mono); letter-spacing: .1em; color: #8a9796; }
 .wall-item.loading { background-image: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 8%, transparent), transparent) !important; background-size: 200% 100% !important; animation: wallShimmer 1.2s linear infinite; }
 .wall-item.loading .wi-info, .wall-item.loading .wi-acts { display: none; }
@@ -168,3 +168,18 @@ html.bg-transparent .main, html.bg-transparent #main { background: rgba(7, 8, 11
 .cl-item { display: grid; grid-template-columns: 84px 1fr; gap: 10px; align-items: baseline; padding: 4px 0; line-height: 1.45; color: #c9d2d1; }
 .cl-item i { font: 600 10px var(--mono); font-style: normal; text-transform: uppercase; letter-spacing: .08em; text-align: center; padding: 2px 0; border: 1px solid; }
 .cl-add { color: var(--accent); } .cl-change { color: #7fb4ff; } .cl-fix { color: #ffb454; }
+.btn-row { display: flex; gap: 8px; flex-shrink: 0; }
+
+/* Mario Kart 8 Deluxe en ligne entre amis */
+.btn-online { height: 48px; padding: 0 18px; background: transparent; color: var(--accent); border: 1px solid var(--accent); font: 700 13px var(--mono); letter-spacing: .12em; cursor: pointer; margin-left: 10px; }
+.btn-online:hover { background: rgba(57,229,200,.08); box-shadow: var(--glow); }
+.btn-online:disabled { opacity: .4; cursor: default; }
+.modal-card.net-modal { width: min(640px, 94vw); }
+.net-zone { margin-top: 16px; display: flex; flex-direction: column; gap: 12px; }
+.net-label { font: 600 11px var(--mono); letter-spacing: .1em; text-transform: uppercase; opacity: .6; }
+.net-code { font: 700 24px var(--mono); letter-spacing: .08em; color: var(--accent); padding: 14px 16px; border: 1px dashed var(--accent); text-align: center; user-select: all; }
+.net-input { flex: 1; min-width: 0; padding: 10px 12px; background: rgba(255,255,255,.04); border: 1px solid var(--line-2); color: inherit; font: 600 15px var(--mono); letter-spacing: .05em; text-transform: uppercase; }
+.net-reach { display: flex; flex-direction: column; gap: 6px; line-height: 1.45; }
+.net-reach .ok { color: #9ef0c8; } .net-reach .warn { color: #ffb454; }
+.net-err { color: #ff6b6b; }
+.net-steps { margin: 0; padding-left: 20px; color: #c9d2d1; line-height: 1.6; }

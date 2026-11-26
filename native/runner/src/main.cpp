@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #include "app.h"
+#include "rewind.h"
 #include <thread>
 #include <atomic>
 #include <cstdarg>
@@ -348,7 +349,7 @@ void captureScreen(const std::string& path) {
 
 // ───────────────────────────── Audio ─────────────────────────────
 static size_t RETRO_CALLCONV audioBatchCb(const int16_t* d, size_t frames) {
-  if (!g_app.audio || g_app.speedMode == 1) return frames; // en turbo, on coupe le son
+  if (!g_app.audio || g_app.speedMode == 1 || g_app.rewinding || g_app.ffHeld) return frames; // turbo / rembobinage : pas de son
   int queued = SDL_GetAudioStreamQueued(g_app.audio);
   int limit = (int)(g_core.av.timing.sample_rate * 4 * 0.15);
   if (queued < limit) SDL_PutAudioStreamData(g_app.audio, d, (int)(frames * 4));
@@ -563,6 +564,7 @@ bool App::loadSlot(int slot) {
   std::vector<uint8_t> st;
   if (!readFile(slotBase(slot) + ".state", st)) { toast("Emplacement vide"); return false; }
   bool ok = g_core.loadState(st);
+  if (ok) { extern void rewindReset(); rewindReset(); }
   toast(ok ? (slot ? "Emplacement " + std::to_string(slot) + " chargé" : "Reprise de ta partie") : "Impossible de charger cette sauvegarde");
   return ok;
 }
@@ -646,7 +648,9 @@ static void pollCalibration() {
   emit(line); // Arcadia l'enregistre pour tous les jeux et tous les moteurs
   g_app.toast("Manette prête", 2200);
 }
-void App::restart() { g_core.reset(); toast("Jeu redémarré"); }
+static Rewind g_rewind;
+void rewindReset() { g_rewind.reset(); }
+void App::restart() { g_core.reset(); g_rewind.reset(); toast("Jeu redémarré"); }
 void App::quit() { wantQuit = true; }
 
 // ───────────────────────────── Raccourcis ─────────────────────────────
@@ -866,13 +870,39 @@ int main(int argc, char** argv) {
     if (g_app.wantQuit) break;
     pollCalibration();
 
+    // Rembobinage (R ou Guide + LT maintenus) et avance rapide maintenue (Guide + RT)
+    {
+      bool free = !g_app.menuOpen && !g_app.resumePrompt && !g_app.paused;
+      const bool* ks = SDL_GetKeyboardState(nullptr);
+      float lt = 0, rt = 0;
+      for (SDL_Gamepad* p : g_app.pads) if (p) { lt = std::max(lt, SDL_GetGamepadAxis(p, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) / 32767.f); rt = std::max(rt, SDL_GetGamepadAxis(p, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) / 32767.f); }
+      static int trA = -1, trB = -1; static bool trInit = false; // essais : ARCADIA_TEST_REWIND=début:fin (images)
+      if (!trInit) { trInit = true; if (const char* t = SDL_getenv("ARCADIA_TEST_REWIND")) SDL_sscanf(t, "%d:%d", &trA, &trB); }
+      bool testRw = trA >= 0 && frameCount >= (uint64_t)trA && frameCount < (uint64_t)trB;
+      bool rw = free && g_app.cfg.getb("rewind", true) && ((ks && ks[SDL_SCANCODE_R]) || (g_app.guideHeld && lt > .5f) || testRw);
+      bool ff = free && g_app.guideHeld && rt > .5f;
+      if ((rw && g_app.guideHeld) || ff) g_app.guideUsed = true;
+      if (rw && !g_app.rewinding) g_app.toast(g_rewind.empty() ? "Rien à rembobiner pour l'instant" : "\xE2\x97\x80\xE2\x97\x80 Rembobinage", 900);
+      if (ff && !g_app.ffHeld) g_app.toast("\xE2\x96\xB6\xE2\x96\xB6 Avance rapide \xC3\x97" "3", 900);
+      g_app.rewinding = rw; g_app.ffHeld = ff;
+    }
     double fps = g_core.av.timing.fps > 1 ? g_core.av.timing.fps : 60.0;
-    uint64_t frameNs = (uint64_t)(1e9 / (fps * g_app.speed));
+    uint64_t frameNs = (uint64_t)(1e9 / (fps * g_app.speed * (g_app.ffHeld ? 3.0 : 1.0)));
     uint64_t now = SDL_GetTicksNS();
-    if (!g_app.paused) {
+    if (!g_app.paused && g_app.rewinding) {
+      // en arrière à environ 2× la vitesse du jeu : un instantané toutes les (intervalle / 2) images
+      static int tick = 0;
+      int ran = 0;
+      while (now >= next && ran < 3) {
+        if (++tick >= std::max(1, g_rewind.interval / 2)) { tick = 0; if (auto st = g_rewind.stepBack()) g_core.loadState(*st); }
+        g_core.run(); frameCount++; ran++; next += frameNs; g_app.fpsFrames++;
+      }
+      if (now > next + frameNs * 4) next = now;
+    } else if (!g_app.paused) {
       int ran = 0;
       while (now >= next && ran < 3) {
         g_core.run(); frameCount++; ran++; next += frameNs;
+        if (g_app.cfg.getb("rewind", true)) g_rewind.capture(g_core.serialize_size ? g_core.serialize_size() : 0, [](void* d, size_t n) { return g_core.serialize(d, n); });
         g_app.mouseDX = g_app.mouseDY = 0;
         if (pendingLoad >= 0) {
           if (g_app.loadSlot(pendingLoad) || ++pendingTries > 90) pendingLoad = -1;

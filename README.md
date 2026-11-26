@@ -27,6 +27,8 @@ Arcadia is a Windows game launcher that turns emulators into **engines**: you on
 
 - **English & French interface**, chosen at first launch. **Online updates** from this repository's releases, downloaded in the background and checksum-verified.
 - **PS1 16:9 widescreen** for games that have a DuckStation community widescreen patch.
+- **Mario Kart 8 Deluxe online with friends**: free private rooms, no account or server — one player hosts, the others join with an invite code (same Wi-Fi or Internet, UPnP port opening).
+- **Rewind & hold-to-fast-forward** in the built-in engine, **drag & drop** of your own keys / firmware / BIOS, and a **custom Switch profile name**.
 
 ## Install
 

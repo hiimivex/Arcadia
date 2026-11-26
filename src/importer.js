@@ -124,6 +124,8 @@ class Importer {
         continue;
       }
       const ext = extOf(p);
+      // fichiers système (installés à part par Arcadia) : jamais rangés comme des jeux
+      if (/^(prod|title)\.keys$|\.(nca|pup)$|^(scph[^\\/]*|ps1_rom|dc_boot|mcpx[^\\/]*)\.bin$/i.test(path.basename(p))) continue;
       if (ARCHIVES.has(ext)) { jobs.push({ kind: 'archive', src: p }); continue; }
       if (!ROM_EXTS.has(ext)) { if (depth === 0) this.results.push({ src: p, ok: false, unknown: true, error: 'pas un fichier ROM reconnu' }); continue; }
       jobs.push({ kind: 'file', src: p, extra: companions(p) });
