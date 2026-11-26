@@ -71,8 +71,12 @@ function switchOpts(lang) {
 
 // Langue retenue : choix du joueur, sinon le français si le jeu l'a, sinon rien (réglage du moteur)
 // Langue de la console émulée = français par défaut : un jeu qui ne l'a pas retombe tout seul sur sa langue par défaut.
-function pick(chosen, available) {
+function pick(chosen, available, pref = 'fr') {
   if (chosen && (!available || !available.length || available.includes(chosen))) return chosen;
+  if (pref === 'en') {
+    if (available && available.length && !available.includes('en') && available.includes('en-GB')) return 'en-GB';
+    return 'en';
+  }
   if (available && available.length && !available.includes('fr') && available.includes('fr-CA')) return 'fr-CA';
   return 'fr';
 }

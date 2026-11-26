@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <vector>
 #include <string>
+#include "tr_en.h"
 
 static ImFont* fReg = nullptr; static ImFont* fBold = nullptr;
 static int section = 0;        // section affichée à droite
@@ -55,9 +56,9 @@ static void glass(ImDrawList* dl, ImVec2 a, ImVec2 b, float r, float alpha = 0.7
 }
 
 static void text(ImDrawList* dl, ImFont* f, float size, ImVec2 p, ImU32 col, const char* s, float wrap = 0) {
-  dl->AddText(f, size * S, p, col, s, nullptr, wrap);
+  dl->AddText(f, size * S, p, col, TR(s), nullptr, wrap);
 }
-static ImVec2 textSize(ImFont* f, float size, const char* s) { return f->CalcTextSizeA(size * S, FLT_MAX, 0, s); }
+static ImVec2 textSize(ImFont* f, float size, const char* s) { return f->CalcTextSizeA(size * S, FLT_MAX, 0, TR(s)); }
 
 // Pilule de navigation (liste de gauche). Renvoie true si validée.
 static bool pill(const char* id, const char* icon, const char* label, bool current, bool enabled, float w, float h) {
@@ -349,14 +350,14 @@ static void drawControlsHint() {
   float a = std::min(1.f, std::min(t / .4f, (7.5f - t) / .6f));
   ImDrawList* fg = ImGui::GetForegroundDrawList(); ImVec2 ds = ImGui::GetIO().DisplaySize;
   SDL_Gamepad* g = g_app.pads[0];
-  std::string l1 = std::string("\xE2\x9C\xA6  ") + (g ? (SDL_GetGamepadName(g) ? SDL_GetGamepadName(g) : "Manette") : "Branche une manette quand tu veux") + "      \xE2\x8C\xA8  Clavier";
+  std::string l1 = std::string("\xE2\x9C\xA6  ") + (g ? (SDL_GetGamepadName(g) ? SDL_GetGamepadName(g) : TR("Manette")) : TR("Branche une manette quand tu veux")) + "      \xE2\x8C\xA8  " + TR("Clavier");
   const char* l2 = "Les deux marchent en même temps. Échap ou Guide : menu → Contrôles pour changer les touches ou calibrer.";
   float w = std::max(textSize(fBold, 20, l1.c_str()).x, textSize(fReg, 17, l2).x) + 56 * S, h = 92 * S;
   ImVec2 p0(36 * S, ds.y - h - 40 * S), p1(p0.x + w, p0.y + h);
   for (int i = 1; i <= 8; i++) { float e = i * 2 * S; fg->AddRect(ImVec2(p0.x - e, p0.y - e), ImVec2(p1.x + e, p1.y + e), W(.04f * a * (1 - i / 9.f)), 26 * S + e, 0, 2 * S); }
   fg->AddRectFilled(p0, p1, K(.86f * a), 26 * S); fg->AddRect(p0, p1, W(.14f * a), 26 * S, 0, 1.2f * S);
-  fg->AddText(fBold, 20 * S, ImVec2(p0.x + 28 * S, p0.y + 18 * S), W(a), l1.c_str());
-  fg->AddText(fReg, 17 * S, ImVec2(p0.x + 28 * S, p0.y + 52 * S), W(.65f * a), l2);
+  fg->AddText(fBold, 20 * S, ImVec2(p0.x + 28 * S, p0.y + 18 * S), W(a), TR(l1.c_str()));
+  fg->AddText(fReg, 17 * S, ImVec2(p0.x + 28 * S, p0.y + 52 * S), W(.65f * a), TR(l2));
 }
 
 static void secAdvanced() {
@@ -444,7 +445,7 @@ static void drawMenu() {
   char clock[16]; SDL_snprintf(clock, sizeof clock, "%02d:%02d", dt.hour, dt.minute);
   ImVec2 cs = textSize(fBold, 30, clock); text(dl, fBold, 30, ImVec2(ds.x - 80 * S - cs.x, T + 6 * S), W(.95f), clock);
   int mins = (int)(g_app.playedNs / 60000000000ULL); char pt[64];
-  if (mins < 60) SDL_snprintf(pt, sizeof pt, "Session : %d min", mins); else SDL_snprintf(pt, sizeof pt, "Session : %d h %02d", mins / 60, mins % 60);
+  if (mins < 60) SDL_snprintf(pt, sizeof pt, TR("Session : %d min"), mins); else SDL_snprintf(pt, sizeof pt, TR("Session : %d h %02d"), mins / 60, mins % 60);
   ImVec2 ps = textSize(fReg, 18, pt); text(dl, fReg, 18, ImVec2(ds.x - 80 * S - ps.x, T + 48 * S), W(.5f), pt);
 
   // Colonne de gauche
@@ -540,13 +541,13 @@ static void drawToasts() {
     ImVec2 p((ds.x - ts.x) * .5f - 28 * S, y), q((ds.x + ts.x) * .5f + 28 * S, y + 52 * S);
     for (int i = 1; i <= 8; i++) { float e = i * 2 * S; fg->AddRect(ImVec2(p.x - e, p.y - e), ImVec2(q.x + e, q.y + e), W(.04f * a * (1 - i / 9.f)), 26 * S + e, 0, 2 * S); }
     fg->AddRectFilled(p, q, K(.88f * a), 26 * S); fg->AddRect(p, q, W(.14f * a), 26 * S, 0, 1.2f * S);
-    fg->AddText(fBold, 20 * S, ImVec2(p.x + 28 * S, p.y + 14 * S), W(a), it->text.c_str());
+    fg->AddText(fBold, 20 * S, ImVec2(p.x + 28 * S, p.y + 14 * S), W(a), TR(it->text.c_str()));
     y -= 64 * S;
   }
   if (g_app.cfg.getb("perf", false) && !g_app.menuOpen) {
     char b[48]; SDL_snprintf(b, sizeof b, "%.0f FPS  ·  %.1f ms", g_app.fps, g_app.fps > 0 ? 1000.f / g_app.fps : 0.f);
     ImVec2 ts = textSize(fBold, 17, b); ImVec2 p(24 * S, 24 * S), q(p.x + ts.x + 32 * S, p.y + 40 * S);
-    fg->AddRectFilled(p, q, K(.75f), 20 * S); fg->AddText(fBold, 17 * S, ImVec2(p.x + 16 * S, p.y + 10 * S), W(.95f), b);
+    fg->AddRectFilled(p, q, K(.75f), 20 * S); fg->AddText(fBold, 17 * S, ImVec2(p.x + 16 * S, p.y + 10 * S), W(.95f), TR(b));
   }
   if (g_app.ptrVirtual && !g_app.menuOpen) { // curseur virtuel (stick droit)
     ImVec2 c(g_app.ptrX, g_app.ptrY); float r = (g_app.ptrDown ? 9.f : 12.f) * S;
@@ -556,7 +557,7 @@ static void drawToasts() {
   if (g_app.speedMode && !g_app.menuOpen) {
     const char* t = g_app.speedMode == 1 ? "\xE2\x96\xB6\xE2\x96\xB6 ×2" : "×0,5";
     ImVec2 ts = textSize(fBold, 18, t); ImVec2 p(ds.x - ts.x - 56 * S, 24 * S), q(ds.x - 24 * S, 64 * S);
-    fg->AddRectFilled(p, q, W(.92f), 20 * S); fg->AddText(fBold, 18 * S, ImVec2(p.x + 16 * S, p.y + 10 * S), K(1), t);
+    fg->AddRectFilled(p, q, W(.92f), 20 * S); fg->AddText(fBold, 18 * S, ImVec2(p.x + 16 * S, p.y + 10 * S), K(1), TR(t));
   }
 }
 
@@ -638,7 +639,7 @@ static void drawPad(ImDrawList* dl, ImVec2 o, float k, const CalibView& v, float
   auto circ = [&](bool lit, ImVec2 c, float r, const char* lab) {
     if (lit) { for (int i = 1; i <= 8; i++) dl->AddCircle(c, r + i * 2.5f * k, W(.1f * pulse * (1 - i / 9.f)), 0, 2.5f * k); dl->AddCircleFilled(c, r, W(pulse)); }
     else dl->AddCircleFilled(c, r, dim);
-    if (lab) { ImVec2 ts = fBold->CalcTextSizeA(r * 1.1f, FLT_MAX, 0, lab); dl->AddText(fBold, r * 1.1f, ImVec2(c.x - ts.x * .5f, c.y - ts.y * .5f), lit ? K(1) : W(.7f), lab); }
+    if (lab) { ImVec2 ts = fBold->CalcTextSizeA(r * 1.1f, FLT_MAX, 0, TR(lab)); dl->AddText(fBold, r * 1.1f, ImVec2(c.x - ts.x * .5f, c.y - ts.y * .5f), lit ? K(1) : W(.7f), TR(lab)); }
   };
   // gâchettes
   hl(on({ "lefttrigger" }), P(130, 40), P(210, 70), 14 * k); hl(on({ "righttrigger" }), P(390, 40), P(470, 70), 14 * k);
@@ -696,7 +697,7 @@ void uiCalib(const CalibView& v) {
     text(dl, fBold, 46, ImVec2(x, y), W(1), v.layout == "switch" ? "Appuie sur A" : v.layout == "generic" ? "Appuie sur un bouton" : "Appuie sur A"); y += 80 * S;
     text(dl, fReg, 21, ImVec2(x, y), W(.62f), "Arcadia reconnaît ta manette et règle toutes les touches pour tous tes jeux : PSP, DS, 3DS, PS1, Game Boy, Switch…", tw);
   } else if (v.phase == 1) {
-    char st[64]; SDL_snprintf(st, sizeof st, "Étape %d / %d", v.step + 1, v.total);
+    char st[64]; SDL_snprintf(st, sizeof st, TR("Étape %d / %d"), v.step + 1, v.total);
     text(dl, fReg, 20, ImVec2(x, y), W(.5f), st);
     text(dl, fReg, 20, ImVec2(x + textSize(fReg, 20, st).x + 16 * S, y), W(.35f), v.padName.c_str()); y += 46 * S;
     text(dl, fBold, 40, ImVec2(x, y), W(1), v.label.c_str(), tw); y += textSize(fBold, 40, v.label.c_str()).y * std::ceil(textSize(fBold, 40, v.label.c_str()).x / tw) + 30 * S;

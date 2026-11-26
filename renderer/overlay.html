@@ -95,6 +95,8 @@
   </div></div>
   <div class="toast" id="toast"></div>
   <div class="banner" id="banner"><b id="b1"></b><span id="b2"></span></div>
+<script src="i18n-data.js"></script>
+<script src="i18n.js"></script>
 <script>
   const $ = s => document.querySelector(s);
   const el = (t, c, txt) => { const e = document.createElement(t); if (c) e.className = c; if (txt != null) e.textContent = txt; return e; };
@@ -164,7 +166,7 @@
         sv.items.forEach((b, i) => {
           const t = el('div', 'row tile' + (i === 0 ? ' first' : ''));
           const im = el('div', 'img'); if (b.thumb) im.style.backgroundImage = `url("${b.thumb}")`; else im.textContent = '◆';
-          const cap = el('div', 'cap'); cap.append(el('b', '', new Date(b.iso).toLocaleString('fr-FR', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })), el('small', '', i === 0 ? 'La plus récente' + (b.machine ? ' · ' + b.machine : '') : (b.machine || '')));
+          const cap = el('div', 'cap'); cap.append(el('b', '', new Date(b.iso).toLocaleString(I18N.locale(), { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })), el('small', '', i === 0 ? 'La plus récente' + (b.machine ? ' · ' + b.machine : '') : (b.machine || '')));
           t.append(im, cap); t.dataset.run = 'load:' + i; t.dataset.tile = i; t.onclick = () => runAct('load:' + i);
           grid.append(t);
         });
@@ -393,7 +395,7 @@
     requestAnimationFrame(poll);
   }
   requestAnimationFrame(poll);
-  function tick() { const d = new Date(); $('#clock').textContent = d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }); }
+  function tick() { const d = new Date(); $('#clock').textContent = d.toLocaleTimeString(I18N.locale(), { hour: '2-digit', minute: '2-digit' }); }
   setInterval(tick, 10000); tick();
   window.ov.onBanner(b => {
     $('#b1').textContent = b.line1; $('#b2').textContent = b.line2;

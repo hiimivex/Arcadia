@@ -28,7 +28,7 @@ function fmtTime(sec) {
   if (!sec) return 'Jamais joué';
   if (sec < 60) return "Moins d'une minute";
   if (sec < 3600) return `${Math.round(sec / 60)} min`;
-  return `${(sec / 3600).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} h`;
+  return `${(sec / 3600).toLocaleString(I18N.locale(), { maximumFractionDigits: 1 })} h`;
 }
 function fmtDate(ms) {
   if (!ms) return 'Jamais';
@@ -37,12 +37,12 @@ function fmtDate(ms) {
   if (days === 0 && d.getDate() === now.getDate()) return "Aujourd'hui";
   if (days <= 1) return 'Hier';
   if (days < 7) return `Il y a ${days} jours`;
-  return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
+  return d.toLocaleDateString(I18N.locale(), { day: 'numeric', month: 'short', year: 'numeric' });
 }
 function fmtSize(b) {
-  const u = ['o', 'Ko', 'Mo', 'Go', 'To']; let i = 0;
+  const u = I18N.lang === 'en' ? ['B', 'KB', 'MB', 'GB', 'TB'] : ['o', 'Ko', 'Mo', 'Go', 'To']; let i = 0;
   while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
-  return `${b.toLocaleString('fr-FR', { maximumFractionDigits: i > 1 ? 1 : 0 })} ${u[i]}`;
+  return `${b.toLocaleString(I18N.locale(), { maximumFractionDigits: i > 1 ? 1 : 0 })} ${u[i]}`;
 }
 const byTitle = (a, b) => a.title.localeCompare(b.title, 'fr', { sensitivity: 'base', numeric: true });
 
@@ -336,7 +336,7 @@ function renderGame() {
   renderMyShots(g);
   $('#g-file').textContent = g.path;
   $('#g-size').textContent = fmtSize(g.size);
-  $('#g-added').textContent = new Date(g.added).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+  $('#g-added').textContent = new Date(g.added).toLocaleDateString(I18N.locale(), { day: 'numeric', month: 'long', year: 'numeric' });
 }
 
 // ------------------------------------------------------------ navigation
@@ -708,6 +708,7 @@ async function newCategory(gameId) {
 function openModal(build, wide) {
   const card = $('#modal-card');
   card.className = 'modal-card' + (wide ? ' wide' : '');
+  card.removeAttribute('data-notr');
   card.replaceChildren();
   build(card);
   $('#modal').classList.remove('hidden');
@@ -948,9 +949,20 @@ async function renderSettings(nav, content, foot) {
     const link = el('button', 'btn about-discord', 'discord.gg/7XczndQEsG'); link.onclick = () => arcadia.openUrl('https://discord.gg/7XczndQEsG');
     ds.append(link); a.append(ds);
     a.append(el('p', 'about-support', 'N\'hésitez pas à me soutenir pour plus de mises à jour : je vais travailler sur mon propre émulateur, un émulateur commun, pour continuer de vous fournir un outil propre, facile d\'accès et léger.'));
+    const ck = el('button', 'btn-ghost', 'Rechercher des mises à jour');
+    ck.onclick = async () => {
+      ck.disabled = true; ck.textContent = 'Recherche…';
+      const r = await arcadia.checkOnline().catch(e => ({ ok: false, error: e.message }));
+      ck.disabled = false; ck.textContent = 'Rechercher des mises à jour';
+      if (!r.ok) toast(`Mise à jour impossible : ${r.error}`, true);
+      else if (r.upToDate) toast(`Arcadia est à jour (${S.version})`);
+      else toast(`Arcadia ${r.version} téléchargé : la bannière de mise à jour arrive`);
+    };
+    a.append(ck);
     const tv = el('button', 'btn-ghost', 'Revoir la visite guidée'); tv.onclick = () => { closeModal(); runTour(0, () => {}); }; a.append(tv);
     a.append(el('div', 'about-ver muted small', `Version ${S.version || ''} · Licence GPL-3.0 · Moteurs : PPSSPP, melonDS, et les émulateurs libres de chaque console`));
     content.append(a);
+    content.append(group('Historique des mises à jour', [changelogEl(CHANGELOG)]));
     if (window.mountWordmarks) mountWordmarks();
     return;
   }
@@ -962,8 +974,10 @@ async function renderSettings(nav, content, foot) {
       appField('Télécharger les jaquettes automatiquement', 'coversOnline', 'bool', null, 'Bases libres libretro-thumbnails et titledb (Switch). Seul le nom ou l\'identifiant du jeu sert à la recherche.'),
       appField('Démarrer en Mode Canapé', 'bigPictureOnStart', 'bool', null, 'Plein écran, navigation à la manette.'),
       appField('Patchs 60 images/s automatiques', 'fps60Auto', 'bool', null, 'Switch, PSP et PS1 : vrais 60 images/s pour les jeux qui ont un patch connu, installés tout seuls (bases communautaires publiques). Désactivable jeu par jeu dans le menu Échap (Switch).'),
+      appField('PS1 en écran large (16:9)', 'ps1Wide', 'bool', null, 'Pour les jeux PS1 qui ont un patch 16:9 dans la base communautaire DuckStation : l\'image remplit tout l\'écran sans être étirée. S\'applique au prochain lancement.'),
       appField('Mode Canapé quand une manette s\'allume', 'couchAuto', 'bool', null, 'Arcadia passe tout seul en plein écran manette dès que tu allumes une manette.'),
-      introField()
+      introField(),
+      appField('Mises à jour automatiques', 'autoUpdate', 'bool', null, 'Arcadia vérifie GitHub au démarrage puis toutes les 6 h, télécharge la nouvelle version en arrière-plan et te propose de l\'installer.')
     ]));
     content.append(group('Pages de jeu', [appField('Clé SteamGridDB (facultative)', 'sgdbKey', 'text', null, 'Pour de grandes bannières façon Steam en haut de chaque jeu. Clé gratuite : crée un compte sur steamgriddb.com puis Préférences → API. Sans clé, Arcadia utilise une capture du jeu.')]));
     content.append(await biosGroup());
@@ -988,6 +1002,8 @@ async function renderSettings(nav, content, foot) {
       appField('Application ID Discord', 'discordId', 'text', null, 'Affiche « Joue à … » sur ton profil. Crée une application gratuite sur discord.com/developers/applications, nomme-la « Arcadia » et colle son Application ID ici. Discord doit être ouvert.')
     ]));
   } else if (sec === 'interface') {
+    const lf = fieldEl({ label: 'Langue · Language', type: 'select', options: [['fr', 'Français'], ['en', 'English']] }, I18N.lang, v => setUiLang(v, true));
+    lf.setAttribute('data-notr', ''); content.append(group('Langue', [lf]));
     content.append(await backgroundGroup());
     content.append(group('Compteur d\'images/s', [
       appField('Afficher les images/s en jeu', 'fpsHud', 'bool', null, 'Par-dessus le jeu, pour la Switch et le moteur Arcadia (PSP, DS, GBA, PS1, N64…). Les autres émulateurs ont leur propre compteur.'),
@@ -1030,7 +1046,7 @@ async function renderSettings(nav, content, foot) {
     const bk = await arcadia.storeBackups();
     const rows = bk.slice(0, 7).map(b => {
       const r = el('div', 'tool');
-      const td3 = el('div', 'td'); td3.append(el('b', '', new Date(b.day).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })), el('div', 'mono', b.file));
+      const td3 = el('div', 'td'); td3.append(el('b', '', new Date(b.day).toLocaleDateString(I18N.locale(), { weekday: 'long', day: 'numeric', month: 'long' })), el('div', 'mono', b.file));
       const rb = el('button', 'btn-ghost', 'Restaurer');
       rb.onclick = async () => { if (await confirmBox('Restaurer les réglages ?', 'Catégories, favoris, heures de jeu et réglages reviennent à cette date. Arcadia redémarre.')) arcadia.restoreStore(b.file); };
       r.append(td3, rb); return r;
@@ -1484,7 +1500,7 @@ $('#banner-sort').onclick = () => proposeSort();
 $('#btn-full').onclick = () => arcadia.toggleFullscreen();
 $('#view-seg').onclick = async e => { const b = e.target.closest('button'); if (b) { S = await arcadia.settings({ viewMode: b.dataset.v }); renderAll(); } };
 $('#btn-folder').onclick = () => arcadia.openFolder(UI.consoleFilter || null);
-$('#btn-emus').onclick = openSettings;
+$('#btn-emus').onclick = () => openSettings();
 $('#btn-add').onclick = async () => { const p = await arcadia.pickRoms(); if (p.length) startImport(p); };
 $('#btn-new-cat').onclick = () => newCategory(null);
 $('#nav-home').onclick = () => { collection = null; showHome(); };
@@ -1528,7 +1544,39 @@ arcadia.onFallback(({ title }) => toast(`${title} : le moteur Arcadia a eu un so
 arcadia.onError(({ id, error }) => { running.delete(id); toast(`Impossible de lancer : ${error}`, true, { label: 'Créer un rapport', fn: makeReport }); renderAll(); });
 
 // ------------------------------------------------------------ démarrage
+// ------------------------------------------------------------ langue de l'interface
+async function setUiLang(l, reload) {
+  I18N.apply(l); await arcadia.setUiLang(l).catch(() => {});
+  if (reload && l !== I18N.lang) arcadia.reloadUi();
+}
+// Premier lancement : choix de la langue (avant tout le reste)
+function pickLanguage() {
+  return new Promise(resolve => {
+    openModal(c => {
+      c.classList.add('fr-modal', 'lang-modal'); c.setAttribute('data-notr', '');
+      c.append(el('div', 'fr-tag', '// langue · language'), el('h2', '', 'Choisis ta langue · Choose your language'));
+      c.append(el('p', '', 'Tu pourras la changer plus tard dans Paramètres → Interface. · You can change it later in Settings → Interface.'));
+      const row = el('div', 'lang-pick');
+      let chosen = false;
+      const iv = setInterval(() => { if (!chosen && $('#modal').classList.contains('hidden')) { clearInterval(iv); chosen = true; setUiLang('fr', false).then(() => resolve('fr')); } }, 300);
+      for (const [code, name, sub] of [['fr', 'Français', 'Interface en français'], ['en', 'English', 'English interface']]) {
+        const b = el('button', 'lang-btn'); b.append(el('b', '', name), el('span', '', sub));
+        b.onclick = async () => { if (chosen) return; chosen = true; clearInterval(iv); closeModal(); await setUiLang(code, false); resolve(code); };
+        row.append(b);
+      }
+      c.append(row);
+      setTimeout(() => row.firstChild.focus(), 50);
+    }, true);
+  });
+}
 (async () => {
+  {
+    const st = (await arcadia.getState().catch(() => null))?.settings || {};
+    let stored = null; try { stored = localStorage.getItem('arcadiaLang'); } catch { /* */ }
+    if (!stored && st.uiLang) { I18N.apply(st.uiLang); if (st.uiLang !== I18N.lang) return arcadia.reloadUi(); }
+    else if (!stored) { const l = await pickLanguage(); if (l !== I18N.lang) return arcadia.reloadUi(); }
+    else if (st.uiLang !== stored) arcadia.setUiLang(stored).catch(() => {});
+  }
   UI = { ...UI, ...(await arcadia.getUi()) };
   UI.collapsed = UI.collapsed || {};
   $('#sort').value = UI.sort;
@@ -1543,37 +1591,76 @@ arcadia.onError(({ id, error }) => { running.delete(id); toast(`Impossible de la
   await checkOrg();
   const up = await arcadia.checkUpdate().catch(() => null);
   if (up && await confirmBox(`Arcadia ${up.version} est disponible`, `Installer la nouvelle version maintenant ? Arcadia se ferme, se met à jour et se relance tout seul. Tes jeux, émulateurs, réglages et sauvegardes ne sont pas touchés.`)) {
-    await updateScreen(up.version); await arcadia.installUpdate(up.file); return;
+    await updateScreen(up.version, () => arcadia.installUpdate(up.file)); return;
   }
   await switchStartupCheck();
-  try { if (!localStorage.getItem('arcadiaTour1')) await firstRun(); } catch { /* stockage indisponible */ }
+  try { if (!localStorage.getItem('arcadiaTour1')) { localStorage.setItem('arcadiaSeenVer', S.version); await firstRun(); } } catch { /* stockage indisponible */ }
+  await whatsNew();
   if (S.settings.bigPictureOnStart) bpOpen();
 })();
 // Écran de mise à jour : l'interface se dissout en pixels, puis Arcadia redémarre
-function updateScreen(version) {
+// ------------------------------------------------------------ historique des mises à jour
+const CL_TAG = { add: ['Ajout', 'New'], change: ['Modif', 'Changed'], fix: ['Correctif', 'Fixed'] };
+function changelogEl(list) {
+  const en = I18N.lang === 'en', box = el('div', 'changelog');
+  box.setAttribute('data-notr', '');
+  for (const r of list) {
+    const v = el('div', 'cl-ver');
+    const h = el('div', 'cl-head'); h.append(el('b', '', `Arcadia ${r.v}`), el('span', '', new Date(r.date).toLocaleDateString(I18N.locale(), { day: 'numeric', month: 'long', year: 'numeric' })));
+    if (r.v === S.version) h.append(el('em', '', en ? 'installed' : 'installée'));
+    v.append(h);
+    for (const [type, fr, eng] of r.items) {
+      const it = el('div', 'cl-item'); it.append(el('i', 'cl-' + type, CL_TAG[type][en ? 1 : 0]), el('span', '', en ? eng : fr)); v.append(it);
+    }
+    box.append(v);
+  }
+  return box;
+}
+// Après une mise à jour : « Nouveautés » une seule fois
+function whatsNew() {
+  let seen = null; try { seen = localStorage.getItem('arcadiaSeenVer'); localStorage.setItem('arcadiaSeenVer', S.version); } catch { return; }
+  if (!seen && localStorage.getItem('arcadiaTour1')) seen = '1.22.0'; // venu d'une version sans historique
+  if (!seen || seen === S.version) return;
+  const num = s => s.split('.').reduce((a, x) => a * 1000 + +x, 0);
+  const fresh = CHANGELOG.filter(r => num(r.v) > num(seen) && num(r.v) <= num(S.version));
+  if (!fresh.length) return;
+  return new Promise(resolve => openModal(c => {
+    c.classList.add('fr-modal');
+    c.append(el('div', 'fr-tag', '// nouveautés'), el('h2', '', `Quoi de neuf dans Arcadia ${S.version}`), changelogEl(fresh));
+    const a = el('div', 'modal-actions'); const ok = el('button', 'btn-white', 'Compris'); ok.onclick = () => { closeModal(); resolve(); };
+    a.append(ok); c.append(a); setTimeout(() => ok.focus(), 50);
+  }, true));
+}
+// Barre de chargement : à 50 % Arcadia lance l'installation et redémarre tout seul
+function updateScreen(version, run) {
   return new Promise(resolve => {
+    document.querySelector('.upd-screen')?.remove();
     const wrap = el('div', 'upd-screen');
     const cv = document.createElement('canvas'); cv.width = innerWidth; cv.height = innerHeight;
-    const txt = el('div', 'upd-txt'); txt.append(el('b', '', 'Mise à jour'), el('span', '', `Arcadia ${version} · redémarrage…`));
-    const bar = el('div', 'upd-bar'); const fill = el('div', ''); bar.append(fill); txt.append(bar);
+    const txt = el('div', 'upd-txt show'); txt.append(el('b', '', 'Mise à jour'), el('span', '', `Arcadia ${version} · redémarrage…`));
+    const bar = el('div', 'upd-bar'); const fill = el('div', ''); bar.append(fill);
+    const pct = el('div', 'upd-pct', '0 %'); txt.append(bar, pct);
     wrap.append(cv, txt); document.body.append(wrap);
     const ctx = cv.getContext('2d'), px = 22, cols = Math.ceil(cv.width / px), rows = Math.ceil(cv.height / px);
     const cells = []; for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) cells.push([x, y, Math.random() * .6 + (y / rows) * .4]);
-    cells.sort((a, b) => a[2] - b[2]);
+    cells.sort((p1, p2) => p1[2] - p2[2]);
     const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#39e5c8';
-    const t0 = performance.now(), dur = 1500;
-    const step = now => {
-      const k = Math.min(1, (now - t0) / dur), n = Math.floor(cells.length * k);
-      for (let i = step.done || 0; i < n; i++) {
-        const [x, y] = cells[i];
-        ctx.fillStyle = Math.random() < .035 ? accent : '#07080b';
-        ctx.fillRect(x * px, y * px, px, px);
-      }
-      step.done = n; fill.style.width = Math.round(k * 100) + '%';
-      if (k < 1) requestAnimationFrame(step); else { txt.classList.add('on'); setTimeout(resolve, 500); }
+    let k = 0, drawn = 0, launched = false, target = .5;
+    const paint = () => {
+      const n = Math.floor(cells.length * Math.min(1, k * 1.6));
+      for (let i = drawn; i < n; i++) { const [x, y] = cells[i]; ctx.fillStyle = Math.random() < .035 ? accent : '#07080b'; ctx.fillRect(x * px, y * px, px, px); }
+      drawn = n; fill.style.width = (k * 100).toFixed(1) + '%'; pct.textContent = Math.round(k * 100) + ' %';
     };
-    requestAnimationFrame(step);
-    setTimeout(() => txt.classList.add('show'), 200);
+    // minuterie (pas requestAnimationFrame : elle avance même si la fenêtre n'est pas au premier plan)
+    const iv = setInterval(async () => {
+      k = Math.min(target, k + (k < .5 ? .5 / 75 : .004)); paint();
+      if (k >= .5 && !launched) {
+        launched = true; txt.classList.add('on'); target = .97; // continue doucement pendant la fermeture
+        const r = run ? await run().catch(e => ({ ok: false, error: e.message })) : { ok: true };
+        if (r && r.ok === false) { clearInterval(iv); wrap.remove(); toast(r.error || 'Mise à jour impossible', true); }
+        resolve(r);
+      }
+    }, 16);
   });
 }
 // ------------------------------------------------------------ premier lancement : avertissement + visite guidée
@@ -1632,14 +1719,21 @@ async function makeReport() {
   const r = await arcadia.makeReport().catch(e => ({ ok: false, error: e.message }));
   if (r.ok) toast(`Rapport créé sur ton Bureau (${r.count} journaux)`); else toast(`Rapport impossible : ${r.error}`, true);
 }
+// Téléchargement d'une nouvelle version depuis GitHub
+arcadia.onUpdDownload(({ version, pct }) => {
+  let p = document.querySelector('.upd-pill.dl');
+  if (!p) { p = el('div', 'upd-pill dl'); p.append(el('span', 'upd-dot'), el('span', 'upd-dl-txt', '')); document.body.append(p); }
+  p.querySelector('.upd-dl-txt').textContent = `Téléchargement d'Arcadia ${version} · ${pct} %`;
+  if (pct >= 100) setTimeout(() => p.remove(), 1500);
+});
 // Nouvelle version déposée pendant qu'Arcadia est ouvert : petite bannière, un clic pour relancer
 arcadia.onUpdate(u => {
-  document.querySelector('.upd-pill')?.remove();
+  document.querySelectorAll('.upd-pill').forEach(x => x.remove());
   const b = el('div', 'upd-pill');
   const go = el('button', 'upd-go', 'Mettre à jour');
   const x = el('button', 'upd-x', '✕'); x.title = 'Plus tard';
   b.append(el('span', 'upd-dot'), el('span', '', `Une mise à jour est disponible · ${u.version}`), go, x);
-  go.onclick = async () => { go.disabled = true; b.remove(); await updateScreen(u.version); const r = await arcadia.installUpdate(u.file); if (r && !r.ok) { document.querySelector('.upd-screen')?.remove(); toast(r.error, true); } };
+  go.onclick = () => { go.disabled = true; b.remove(); updateScreen(u.version, () => arcadia.installUpdate(u.file)); };
   x.onclick = () => b.remove();
   document.body.append(b);
 });
@@ -1974,7 +2068,7 @@ function bpOpen() {
   $('#bp').classList.remove('hidden');
   document.body.classList.add('bp-on');
   arcadia.setFullscreen(true).then(prev => { BP.restoreFs = !prev; });
-  const tick = () => { $('#bp-clock').textContent = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }); };
+  const tick = () => { $('#bp-clock').textContent = new Date().toLocaleTimeString(I18N.locale(), { hour: '2-digit', minute: '2-digit' }); };
   tick(); BP.clock = setInterval(tick, 1000);
   bpRender();
   sfx('open');
@@ -2216,7 +2310,7 @@ async function showStats() {
     if (d.getFullYear() !== start.getFullYear()) break;
     const c = el('i'); const v3 = perDay[d.toDateString()] || 0;
     if (v3) c.style.background = `rgba(255,255,255,${0.2 + 0.8 * v3 / maxD})`;
-    c.title = `${d.toLocaleDateString('fr-FR')} · ${v3 ? fmtTime(v3) : 'pas de jeu'}`;
+    c.title = `${d.toLocaleDateString(I18N.locale())} · ${v3 ? fmtTime(v3) : 'pas de jeu'}`;
     grid.append(c);
   }
   grid.style.gridAutoFlow = 'column'; grid.style.gridTemplateRows = 'repeat(7, 12px)'; grid.style.gridTemplateColumns = 'none'; grid.style.gridAutoColumns = '12px';
@@ -2343,7 +2437,7 @@ function inputModal(first) {
 }
 
 // « Reprendre ta partie ? » pour les jeux sur émulateur externe : sauvegarde actuelle du jeu, ou une copie
-const fmtCopy = iso => new Date(iso).toLocaleString('fr-FR', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+const fmtCopy = iso => new Date(iso).toLocaleString(I18N.locale(), { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
 const ago = iso => {
   const m = Math.round((Date.now() - new Date(iso)) / 60000);
   if (m < 1) return 'à l\'instant'; if (m < 60) return `il y a ${m} min`;
@@ -2409,7 +2503,7 @@ function langField(g, gs) {
     return l;
   }
   const sel = el('select');
-  sel.append(Object.assign(el('option', '', langs.includes('fr') ? 'Automatique (français)' : 'Automatique (langue du jeu)'), { value: '' }));
+  sel.append(Object.assign(el('option', '', I18N.lang === 'en' ? (langs.includes('en') ? 'Automatique (anglais)' : 'Automatique (langue du jeu)') : langs.includes('fr') ? 'Automatique (français)' : 'Automatique (langue du jeu)'), { value: '' }));
   for (const c of langs) sel.append(Object.assign(el('option', '', LANG_NAMES[c] || c), { value: c }));
   sel.value = gs.lang && langs.includes(gs.lang) ? gs.lang : '';
   sel.onchange = async () => { S = await arcadia.gameSettings(g.id, { lang: sel.value || null }); toast(`Langue : ${sel.value ? LANG_NAMES[sel.value] : 'automatique'} (au prochain lancement)`); };

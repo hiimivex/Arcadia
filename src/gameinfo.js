@@ -1,3 +1,5 @@
+let PREF = 'fr';
+const LANG_ORDER = () => (PREF === 'en' ? ['en', 'fr'] : ['fr', 'en']);
 // Fiche d'un jeu sans clé d'API : Wikidata (studio, éditeur, sortie, genre, série, modes)
 // + résumé Wikipédia en français (anglais à défaut). Bannière « hero » via SteamGridDB si une clé est fournie.
 const UA = 'Arcadia/1.8 (lanceur de jeux open source)';
@@ -40,6 +42,8 @@ function claimDates(ent, p) {
 const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
 function fmtDate(d) {
   if (!d) return null;
+  const MO = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  if (PREF === 'en') { if (d.precision >= 11 && d.d) return `${MO[d.m - 1]} ${d.d}, ${d.y}`; if (d.precision >= 10 && d.m) return `${MO[d.m - 1]} ${d.y}`; return String(d.y); }
   if (d.precision >= 11 && d.d) return `${d.d === 1 ? '1er' : d.d} ${MOIS[d.m - 1]} ${d.y}`;
   if (d.precision >= 10 && d.m) return `${MOIS[d.m - 1]} ${d.y}`;
   return String(d.y);
@@ -80,8 +84,8 @@ async function wikiInfo(title, consoleId, opts = {}) {
   const variants = [...new Set([q, q.replace(/\s+-\s+/g, ': '), q.split(/\s+-\s+/)[0]].filter(v => v && v.length > 2))];
   for (const v of variants) {
     if (ids.size >= 8) break;
-    for (const lang of ['fr', 'en']) {
-      const r = await get(`https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(v)}&language=${lang}&uselang=fr&type=item&limit=6&format=json`);
+    for (const lang of LANG_ORDER()) {
+      const r = await get(`https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(v)}&language=${lang}&uselang=${LANG_ORDER()[0]}&type=item&limit=6&format=json`);
       for (const x of r.search || []) ids.add(x.id);
     }
   }
@@ -96,13 +100,13 @@ async function wikiInfo(title, consoleId, opts = {}) {
   const labels = {};
   if (all.length) {
     const l = await get(`https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${all.join('|')}&props=labels&languages=fr|en&format=json`);
-    for (const [id, v] of Object.entries(l.entities || {})) labels[id] = (v.labels && (v.labels.fr || v.labels.en) || {}).value;
+    for (const [id, v] of Object.entries(l.entities || {})) labels[id] = (v.labels && (v.labels[LANG_ORDER()[0]] || v.labels[LANG_ORDER()[1]]) || {}).value;
   }
   const lab = list => [...new Set(list.map(id => labels[id]).filter(Boolean))];
   const dates = claimDates(ent, 'P577');
   const info = {
     qid: ent.id,
-    title: (ent.labels && (ent.labels.fr || ent.labels.en) || {}).value || q,
+    title: (ent.labels && (ent.labels[LANG_ORDER()[0]] || ent.labels[LANG_ORDER()[1]]) || {}).value || q,
     developer: lab(want.developer).slice(0, 3), publisher: lab(want.publisher).slice(0, 3),
     genre: lab(want.genre).slice(0, 3).map(g => g.charAt(0).toUpperCase() + g.slice(1)),
     series: lab(want.series)[0] || null, modes: lab(want.modes).slice(0, 3).map(g => g.charAt(0).toUpperCase() + g.slice(1)),
@@ -110,7 +114,7 @@ async function wikiInfo(title, consoleId, opts = {}) {
     desc: null, lang: null, source: `https://www.wikidata.org/wiki/${ent.id}`
   };
   // Résumé Wikipédia
-  for (const lang of ['fr', 'en']) {
+  for (const lang of LANG_ORDER()) {
     const page = ent.sitelinks && ent.sitelinks[`${lang}wiki`] && ent.sitelinks[`${lang}wiki`].title;
     if (!page) continue;
     try {
@@ -138,4 +142,4 @@ async function sgdbHero(title, key, opts = {}) {
   return hero ? { url: hero.url, game: game.name } : null;
 }
 
-module.exports = { wikiInfo, sgdbHero, cleanTitle, norm, fmtDate, PLATFORM_QID };
+module.exports = { setLang: l => { PREF = l === 'en' ? 'en' : 'fr'; }, wikiInfo, sgdbHero, cleanTitle, norm, fmtDate, PLATFORM_QID };

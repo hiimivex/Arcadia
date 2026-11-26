@@ -25,6 +25,19 @@ Arcadia is a Windows game launcher that turns emulators into **engines**: you on
 - **Automatic 60 FPS patches** for Switch, PSP and PS1 games that have one, from public community databases (NX-60FPS-RES-GFX-Cheats, CWCheat-Database-Plus, DuckStation chtdb).
 - **In-game FPS counter**, NVIDIA DLSS for Switch 2 games, custom wallpapers with automatic button palette, neon interface.
 
+- **English & French interface**, chosen at first launch. **Online updates** from this repository's releases, downloaded in the background and checksum-verified.
+- **PS1 16:9 widescreen** for games that have a DuckStation community widescreen patch.
+
+## Install
+
+1. Download `Arcadia-Setup-x.y.z.exe` from the [latest release](../../releases/latest) and run it (no admin rights needed).
+2. **Windows SmartScreen** may show *"Windows protected your PC"*: the installer isn't code-signed yet (a certificate is expensive for a solo project). Click **More info → Run anyway**.
+3. Pick your Arcadia folder, then drop your own game dumps into the window.
+
+After that, Arcadia updates itself: new releases are detected, downloaded and installed in one click.
+
+> **Coming from 1.22.0?** Its update button can get stuck. Close Arcadia and run the new `Arcadia-Setup` once by hand; later updates work from inside the app.
+
 > ⚠️ **Arcadia is still in development.** If something major breaks, come and tell us on [Discord](https://discord.gg/7XczndQEsG).
 
 > **Arcadia ships no games, BIOS, keys or firmware**, and never will. Use dumps of games and consoles you own. Arcadia is not affiliated with Nintendo, Sony, Microsoft or any console maker.
@@ -75,6 +88,16 @@ Arcadia est un lanceur de jeux pour Windows qui transforme les émulateurs en **
 - **Moteurs externes** (Switch, PS2, PS3, Wii U…) lancés sans leur interface, avec le menu Arcadia par-dessus.
 - **Manette et clavier en même temps** dans tous les jeux, calibrage « appuie sur A », même en jeu.
 - **Langue du jeu** choisie parmi les langues présentes dans la ROM.
+
+- **Interface en français ou en anglais**, au choix dès le premier lancement. **Mises à jour en ligne** depuis les releases de ce dépôt.
+
+### Installation
+
+1. Télécharge `Arcadia-Setup-x.y.z.exe` dans la [dernière release](../../releases/latest) et lance-le (pas besoin des droits administrateur).
+2. **Windows SmartScreen** peut afficher « Windows a protégé votre ordinateur » : l'installateur n'est pas encore signé (un certificat coûte cher pour un projet solo). Clique sur **Informations complémentaires → Exécuter quand même**.
+3. Choisis ton dossier Arcadia, puis glisse les copies de tes propres jeux dans la fenêtre.
+
+> **Tu viens de la 1.22.0 ?** Son bouton de mise à jour peut rester bloqué : ferme Arcadia et lance une fois le nouveau Setup à la main. Ensuite, les mises à jour se font depuis l'application.
 
 **Arcadia ne fournit aucun jeu, BIOS, clé ni firmware.** Utilise les copies de tes propres jeux et consoles.
 

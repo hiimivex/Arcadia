@@ -48,6 +48,37 @@ function regionScore(name) {
   return s;
 }
 
+// Titres français / abréviations → nom anglais utilisé par libretro-thumbnails
+const ALIASES = [
+  [/^gta\b/i, 'Grand Theft Auto'], [/^mgs\b/i, 'Metal Gear Solid'], [/^nfs\b/i, 'Need for Speed'], [/^kh\b/i, 'Kingdom Hearts'],
+  [/^professeur layton et l['’ ]?(é|e)trange village/i, 'Professor Layton and the Curious Village'],
+  [/^professeur layton et la bo(î|i)te de pandore/i, 'Professor Layton and the Diabolical Box'],
+  [/^professeur layton et le destin perdu/i, 'Professor Layton and the Lost Future'],
+  [/^professeur layton et l['’ ]?appel du spectre/i, 'Professor Layton and the Spectre\'s Call'],
+  [/^professeur layton et le masque des miracles/i, 'Professor Layton and the Miracle Mask'],
+  [/^professeur layton et l['’ ]?h(é|e)ritage des aslantes/i, 'Professor Layton and the Azran Legacy'],
+  [/^professeur layton/i, 'Professor Layton'],
+  [/^pok(é|e)mon (version )?ultra[- ]soleil/i, 'Pokemon Ultra Sun'], [/^pok(é|e)mon (version )?ultra[- ]lune/i, 'Pokemon Ultra Moon'],
+  [/^pok(é|e)mon (version )?soleil/i, 'Pokemon Sun'], [/^pok(é|e)mon (version )?lune/i, 'Pokemon Moon'],
+  [/^pok(é|e)mon (version )?rubis (o|ô)m(é|e)ga/i, 'Pokemon Omega Ruby'], [/^pok(é|e)mon (version )?saphir alpha/i, 'Pokemon Alpha Sapphire'],
+  [/^pok(é|e)mon (version )?diamant/i, 'Pokemon - Diamond Version'], [/^pok(é|e)mon (version )?perle/i, 'Pokemon - Pearl Version'],
+  [/^pok(é|e)mon (version )?platine/i, 'Pokemon - Platinum Version'], [/^pok(é|e)mon (version )?or heartgold/i, 'Pokemon - HeartGold Version'],
+  [/^pok(é|e)mon (version )?argent soulsilver/i, 'Pokemon - SoulSilver Version'],
+  [/^pok(é|e)mon donjon myst(è|e)re/i, 'Pokemon Mystery Dungeon'], [/^pok(é|e)mon ranger/i, 'Pokemon Ranger'],
+  [/^la l(é|e)gende de zelda|^zelda/i, 'Legend of Zelda, The -'],
+  [/^entra(î|i)nement c(é|e)r(é|e)bral|^programme d['’ ]?entra(î|i)nement c(é|e)r(é|e)bral/i, 'Brain Age - Train Your Brain in Minutes a Day']
+];
+function aliases(titles) {
+  const out = [...titles];
+  for (const t of titles) {
+    const s = String(t || '').trim();
+    for (const [re, en] of ALIASES) if (re.test(s)) { out.push(s.replace(re, en)); break; }
+  }
+  return [...new Set(out)];
+}
+// Suite d'un autre jeu (« Brain Age » ≠ « Brain Age 2 ») : le nom continue par un chiffre ou un chiffre romain
+const sequelOf = (n, k) => n.length > k.length && n.startsWith(k) && /^([0-9]|ii|iii|iv|v[^a-z]|vi)/.test(n.slice(k.length));
+
 class Covers {
   constructor(cacheDir) {
     this.dir = cacheDir;
@@ -85,6 +116,7 @@ class Covers {
 
   // Meilleur nom libretro pour un titre, ou null.
   static pick(idx, titles) {
+    titles = aliases(titles);
     for (const t of titles) {
       const k = norm(t);
       if (k.length < 2) continue;
@@ -94,7 +126,7 @@ class Covers {
     for (const t of titles) {
       const k = norm(t);
       if (k.length < 5) continue;
-      const near = idx.filter(([n]) => n.startsWith(k) || (k.startsWith(n) && n.length >= 6));
+      const near = idx.filter(([n]) => (n.startsWith(k) && !sequelOf(n, k)) || (k.startsWith(n) && n.length >= 6));
       if (near.length) {
         near.sort((a, b) => Math.abs(a[0].length - k.length) - Math.abs(b[0].length - k.length) || regionScore(a[1]) - regionScore(b[1]));
         return near[0][1];

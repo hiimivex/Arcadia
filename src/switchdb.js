@@ -11,7 +11,7 @@ const norm = s => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '')
 
 // "Mario Golf Super Rush [0100C9C00E25C000][v0].nsp" -> "0100C9C00E25C000"
 function titleIdFrom(name) {
-  const m = (name || '').match(/\b(01[0-9A-F]{14})\b/i);
+  const m = X;
   if (!m) return null;
   const id = m[1].toUpperCase();
   return id.slice(0, 13) + '000'; // mise à jour (…800) ou DLC -> jeu de base

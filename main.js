@@ -9,6 +9,7 @@ const { createConsoleFolders, scanLibrary, findLoose } = require('./src/library'
 const { SCHEMAS, resolveFile, allFields } = require('./src/emuschemas');
 const { readValues, writeValues, saveFile } = require('./src/configfiles');
 const GameInfo = require('./src/gameinfo');
+const I18N = require('./renderer/i18n.js');
 const Multi = require('./src/multiplayer');
 const SwitchCfg = require('./src/switchcfg');
 const Proc = require('./src/proctl');
@@ -61,6 +62,8 @@ const DEFAULT_SETTINGS = {
   accentByConsole: false,
   couchAuto: true,
   fpsHud: false,
+  autoUpdate: true,
+  ps1Wide: true,             // PS1 : patch écran large 16:9 quand la base DuckStation en a un          // télécharger tout seul les nouvelles versions publiées sur GitHub
   fps60Auto: true,          // patchs 60 images/s automatiques (Switch, PSP, PS1)            // compteur d'images/s par-dessus le jeu
   fpsHudPos: 'tl',          // tl tr bl br
   fpsHudSize: 'm',          // s m l         // Mode Canapé quand une manette s'allume    // lueur à la couleur de la console
@@ -132,6 +135,7 @@ app.whenReady().then(() => {
   for (const k of ['categories', 'gameCats', 'media', 'titles', 'customCovers']) if (!store.get(k)) store.data[k] = k === 'categories' ? [] : {};
   for (const d of ['icons', 'covers', 'custom', 'shots']) fs.mkdirSync(path.join(MEDIA(), d), { recursive: true });
   setupAfterStore();
+  setUiLang(settings().uiLang);
   backupStore(store.file, path.join(savesRoot(), '_arcadia'));
   covers = new Covers(path.join(MEDIA(), 'libretro'));
   switchDb = new SwitchDb(path.join(MEDIA(), 'switch'));
@@ -150,7 +154,10 @@ app.whenReady().then(() => {
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 
-app.whenReady().then(() => { if (helper.available) helper.start(); watchUpdates(); });
+app.whenReady().then(() => {
+  if (helper.available) helper.start(); watchUpdates();
+  setTimeout(() => checkGithubUpdate(false), 20000); setInterval(() => checkGithubUpdate(false), 6 * 3600e3);
+});
 app.on('before-quit', () => { helper.stop(); try { backupStore(store.file, path.join(savesRoot(), '_arcadia')); } catch { /* */ } });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 
@@ -693,7 +700,7 @@ ipcMain.handle('emus:install', async (_e, ids) => {
 const verNum = v => v.split('.').map(Number).reduce((a, n) => a * 1000 + (n || 0), 0);
 function findUpdate() {
   const lib = store.get('libraryDir');
-  const dirs = [path.dirname(process.env.PORTABLE_EXECUTABLE_FILE || app.getPath('exe')), ROOT, lib, lib && path.dirname(lib)].filter(exists);
+  const dirs = [path.dirname(process.env.PORTABLE_EXECUTABLE_FILE || app.getPath('exe')), ROOT, ROOT && path.join(ROOT, '_updates'), lib, lib && path.dirname(lib)].filter(exists);
   let best = null;
   for (const d of new Set(dirs)) {
     let names = [];
@@ -716,7 +723,7 @@ ipcMain.handle('app:installUpdate', (_e, file) => {
   const exeDir = path.dirname(app.getPath('exe'));
   const installDir = path.basename(exeDir).toLowerCase() === 'app' ? path.dirname(exeDir) : exeDir;
   require('child_process').spawn(u.file, ['/S', `/D=${installDir}`], { detached: true, stdio: 'ignore' }).unref();
-  setTimeout(() => app.quit(), 300);
+  setTimeout(() => { app.quit(); setTimeout(() => app.exit(0), 2500); }, 300); // sortie forcée si une fenêtre retient Arcadia
   return { ok: true };
 });
 
@@ -732,9 +739,57 @@ function installQuickUpdate(u) {
   ].join('\r\n'));
   require('child_process').spawn('cmd.exe', ['/c', bat], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
   log?.write('INFO', `mise à jour rapide vers ${u.version}`);
-  setTimeout(() => app.quit(), 300);
+  setTimeout(() => { app.quit(); setTimeout(() => app.exit(0), 2500); }, 300); // sortie forcée si une fenêtre retient Arcadia
   return { ok: true };
 }
+// Mise à jour en ligne : la dernière release GitHub publique est téléchargée dans <Arcadia>\_updates,
+// puis proposée comme une mise à jour posée à la main (bannière + écran de mise à jour).
+const GH_REPO = 'hiimivex/Arcadia';
+let ghBusy = false;
+async function checkGithubUpdate(manual) {
+  if (ghBusy || !app.isPackaged || process.platform !== 'win32' || !ROOT) return { ok: false, error: 'indisponible' };
+  if (!manual && settings().autoUpdate === false) return { ok: false, error: 'désactivé' };
+  ghBusy = true;
+  try {
+    const r = await net.fetch(`https://api.github.com/repos/${GH_REPO}/releases/latest`, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Arcadia' } });
+    if (r.status === 404) return { ok: true, latest: app.getVersion(), upToDate: true }; // aucune release publiée
+    if (!r.ok) throw new Error(`GitHub HTTP ${r.status}`);
+    const rel = await r.json();
+    const version = String(rel.tag_name || '').replace(/^v/i, '');
+    if (!/^\d+\.\d+\.\d+$/.test(version) || verNum(version) <= verNum(app.getVersion())) return { ok: true, latest: version || app.getVersion(), upToDate: true };
+    const asset = (rel.assets || []).find(a => new RegExp(`^Arcadia-Setup-${version.replace(/\./g, '\\.')}\\.exe$`, 'i').test(a.name));
+    if (!asset) return { ok: false, error: `Version ${version} publiée sans installateur` };
+    const dir = path.join(ROOT, '_updates'); fs.mkdirSync(dir, { recursive: true });
+    const dest = path.join(dir, asset.name);
+    if (exists(dest) && fs.statSync(dest).size === asset.size) return { ok: true, version, ready: true };
+    log?.write('INFO', `mise à jour en ligne : téléchargement de ${asset.name}`);
+    win?.webContents.send('app:updDownload', { version, pct: 0 });
+    const d = await net.fetch(asset.browser_download_url, { headers: { 'User-Agent': 'Arcadia' } });
+    if (!d.ok || !d.body) throw new Error(`Téléchargement : HTTP ${d.status}`);
+    const part = dest + '.part', out = fs.createWriteStream(part), hash = require('crypto').createHash('sha256');
+    let got = 0, lastPct = -1;
+    const reader = d.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const buf = Buffer.from(value); got += buf.length; hash.update(buf);
+      if (!out.write(buf)) await new Promise(res => out.once('drain', res));
+      const pct = Math.floor(got * 100 / (asset.size || 1));
+      if (pct !== lastPct && pct % 5 === 0) { lastPct = pct; win?.webContents.send('app:updDownload', { version, pct }); }
+    }
+    await new Promise((res, rej) => out.end(err => (err ? rej(err) : res())));
+    if (asset.size && got !== asset.size) { fs.rmSync(part, { force: true }); throw new Error('téléchargement incomplet'); }
+    const want = /^sha256:([0-9a-f]{64})$/i.exec(asset.digest || '');
+    if (want && want[1].toLowerCase() !== hash.digest('hex')) { fs.rmSync(part, { force: true }); throw new Error('empreinte sha256 différente : fichier rejeté'); }
+    fs.renameSync(part, dest);
+    log?.write('INFO', `mise à jour en ligne : ${asset.name} prêt`);
+    return { ok: true, version, ready: true };
+  } catch (e) {
+    log?.write('INFO', `mise à jour en ligne : ${e.message}`);
+    return { ok: false, error: e.message };
+  } finally { ghBusy = false; }
+}
+ipcMain.handle('app:checkOnline', () => checkGithubUpdate(true));
 // Surveille l'arrivée d'une nouvelle version pendant qu'Arcadia est ouvert
 let updNotified = null;
 function watchUpdates() {
@@ -1373,6 +1428,31 @@ ipcMain.handle('switch:install', async (_e, what) => {
 // Échap, Guide ou Back+Start bref : le jeu est mis en pause (processus suspendu) et le menu Arcadia s'affiche.
 const OV = { win: null, game: null, open: false, relaunch: null };
 const UI_ACCENT = { c: null, on: null }; // couleur des boutons d'Arcadia, reprise par le menu Échap
+// Langue de l'interface (fr / en) : boîtes de dialogue Windows, moteur Arcadia, fiches des jeux
+function setUiLang(l) {
+  I18N.setLang(l); GameInfo.setLang(I18N.lang); process.env.ARCADIA_LANG = I18N.lang;
+}
+{
+  const tr = o => {
+    if (!o || typeof o !== 'object') return o;
+    const r = { ...o };
+    for (const k of ['title', 'message', 'detail', 'buttonLabel', 'checkboxLabel']) if (typeof r[k] === 'string') r[k] = I18N.t(r[k]);
+    if (Array.isArray(r.buttons)) r.buttons = r.buttons.map(b => I18N.t(b));
+    if (Array.isArray(r.filters)) r.filters = r.filters.map(f => ({ ...f, name: I18N.t(f.name) }));
+    return r;
+  };
+  for (const fn of ['showOpenDialog', 'showSaveDialog', 'showMessageBox', 'showOpenDialogSync', 'showSaveDialogSync', 'showMessageBoxSync']) {
+    const orig = dialog[fn].bind(dialog);
+    dialog[fn] = (a, b) => (b === undefined ? orig(tr(a)) : orig(a, tr(b)));
+  }
+  const eb = dialog.showErrorBox.bind(dialog);
+  dialog.showErrorBox = (t, c) => eb(I18N.t(t), I18N.t(c));
+}
+ipcMain.on('ui:reload', e => e.sender.reload());
+ipcMain.handle('ui:lang', (_e, l) => {
+  store.data.settings = { ...settings(), uiLang: l === 'en' ? 'en' : 'fr' }; store.save();
+  setUiLang(l); return I18N.lang;
+});
 ipcMain.on('ui:accent', (_e, c, on) => { UI_ACCENT.c = typeof c === 'string' && /^#[0-9a-f]{6}$|^rgb/i.test(c) ? c : null; UI_ACCENT.on = typeof on === 'string' ? on : null; });
 // Réglages proposés dans le menu Arcadia des moteurs Switch (appliqués au prochain lancement du jeu)
 const SW_OPTS = [
@@ -1394,7 +1474,7 @@ const SW_OPTS = [
 // Langue retenue pour un jeu : choix du joueur, sinon le français s'il est dans la ROM
 function gameLang(g) {
   const gs = (store.get('gameSettings') || {})[g.id] || {};
-  return Langs.pick(gs.lang || null, decorate(g).langs);
+  return Langs.pick(gs.lang || null, decorate(g).langs, I18N.lang);
 }
 // Images intermédiaires : choix Arcadia → réglages du moteur (frame_gen + type : 1 Optical Flow, 2 DLSS Frame Generation)
 function frameGenChoice(o) { return o['Arcadia/frame_gen'] || (o['Renderer/frame_gen'] === 'true' ? 'of' : 'off'); }
@@ -1501,13 +1581,25 @@ async function refreshPspDb(force) {
 async function cachePs1(serial) {
   const id = Patches.dashSerial(serial); if (!id) return;
   const f = path.join(patchesDir(), 'PS1', id + '.txt');
-  try { if (Date.now() - fs.statSync(f).mtimeMs < 7 * 864e5) return; } catch { /* absent */ }
+  try { if (Date.now() - fs.statSync(f).mtimeMs < 7 * 864e5 && exists(f.replace(/\.txt$/, '.ws.txt'))) return; } catch { /* absent */ }
   const texts = [];
   for (const d of ['patches', 'cheats']) { const r = await net.fetch(`${Patches.PS1_RAW}/${d}/${id}.cht`); if (r.ok) texts.push(await r.text()); else if (r.status !== 404) throw new Error('HTTP ' + r.status); }
   fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, Patches.ps1Sixty(...texts).join('\n')); // vide = pas de patch
+  fs.writeFileSync(f.replace(/\.txt$/, '.ws.txt'), Patches.ps1Wide(...texts).join('\n'));
+}
+// Patch 16:9 PS1 prêt pour ce jeu (et activé dans les paramètres)
+function ps1WideFile(g) {
+  if (g.console !== 'PS1' || settings().ps1Wide === false) return null;
+  const id = Patches.dashSerial(decorate(g).serial); if (!id) return null;
+  const f = path.join(patchesDir(), 'PS1', id + '.ws.txt');
+  try { return fs.readFileSync(f, 'utf8').trim() ? f : null; } catch { return null; }
 }
 // Options du cœur liées aux patchs (PPSSPP : lire les triches)
-function runnerPatchOpts(g) { return g.console === 'PSP' ? ['ppsspp_cheats=enabled'] : []; }
+function runnerPatchOpts(g) {
+  if (g.console === 'PSP') return ['ppsspp_cheats=enabled'];
+  if (ps1WideFile(g) && setupFor(g)?.coreName === 'swanstation_libretro') return ['swanstation_Display_AspectRatio=16:9'];
+  return [];
+}
 // Prépare les patchs d'un jeu juste avant de le lancer ; renvoie les arguments du moteur
 function runnerPatchArgs(g) {
   const on = fps60On(g), serial = decorate(g).serial;
@@ -1518,10 +1610,14 @@ function runnerPatchArgs(g) {
       if (c) { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(file, Patches.pspIni(serial, entry.title, c, on)); log?.write('INFO', `60 images/s PSP : ${c.name} ${on ? 'activé' : 'désactivé'}`); }
       else if (!pspDb()) refreshPspDb().catch(() => {}); // base pas encore là : prête pour la prochaine partie
     }
-    if (g.console === 'PS1' && on && Patches.dashSerial(serial)) {
-      const f = path.join(patchesDir(), 'PS1', Patches.dashSerial(serial) + '.txt');
-      if (exists(f) && fs.readFileSync(f, 'utf8').trim()) { log?.write('INFO', '60 images/s PS1 : patch activé'); return ['--cheats', f]; }
-      if (!exists(f)) cachePs1(serial).catch(() => {});
+    if (g.console === 'PS1' && Patches.dashSerial(serial)) {
+      const id = Patches.dashSerial(serial), f = path.join(patchesDir(), 'PS1', id + '.txt');
+      if (!exists(f) || !exists(f.replace(/\.txt$/, '.ws.txt'))) { cachePs1(serial).catch(() => {}); }
+      const parts = [];
+      if (on && exists(f) && fs.readFileSync(f, 'utf8').trim()) { parts.push(fs.readFileSync(f, 'utf8').trim()); log?.write('INFO', '60 images/s PS1 : patch activé'); }
+      const ws = ps1WideFile(g);
+      if (ws && setupFor(g)?.coreName === 'swanstation_libretro') { parts.push(fs.readFileSync(ws, 'utf8').trim()); log?.write('INFO', 'écran large PS1 : patch 16:9 activé'); }
+      if (parts.length) { const run = path.join(patchesDir(), 'PS1', id + '.run.txt'); fs.writeFileSync(run, parts.join('\n')); return ['--cheats', run]; }
     }
   } catch (e) { log?.write('INFO', `patchs : ${e.message}`); }
   return [];
@@ -1618,7 +1714,7 @@ function overlayData() {
     const dg = g && decorate(g);
     if (dg && dg.langs && dg.langs.length) {
       const LN = Langs.LANGS, chosen = ((store.get('gameSettings') || {})[G.id] || {}).lang || '';
-      d.opts.unshift({ sec: 'langue', key: 'Arcadia/lang', label: 'Langue du jeu', hint: dg.langsFromRom ? 'Langues présentes dans ce jeu' : 'Le jeu l\'utilise s\'il la propose', values: [['', dg.langs.includes('fr') ? 'Automatique (français)' : 'Automatique'], ...dg.langs.map(c => [c, LN[c] || c])], value: chosen });
+      d.opts.unshift({ sec: 'langue', key: 'Arcadia/lang', label: 'Langue du jeu', hint: dg.langsFromRom ? 'Langues présentes dans ce jeu' : 'Le jeu l\'utilise s\'il la propose', values: [['', I18N.lang === 'en' ? (dg.langs.includes('en') ? 'Automatique (anglais)' : 'Automatique') : dg.langs.includes('fr') ? 'Automatique (français)' : 'Automatique'], ...dg.langs.map(c => [c, LN[c] || c])], value: chosen });
     }
     d.pending = !!G.changed;
   }
@@ -2031,9 +2127,10 @@ ipcMain.handle('game:details', async (_e, id, force) => {
     }
   } catch { /* hors ligne : on réessaiera */ }
   // Fiche Wikipédia / Wikidata (studio, éditeur, sortie, genre, série, résumé)
+  if (det.info && (det.info.uiLang || 'fr') !== I18N.lang) { det.info = null; det.desc = null; det.infoTried = 0; } // fiche dans l'autre langue de l'interface
   if (!det.info && (force || Date.now() - det.infoTried > 6 * 3600e3)) {
     det.infoTried = Date.now();
-    try { det.info = await GameInfo.wikiInfo(title, g.console, { fetch: net.fetch.bind(net) }); if (!det.info) log?.write('INFO', `fiche ${title} : aucun jeu correspondant sur Wikidata`); }
+    try { det.info = await GameInfo.wikiInfo(title, g.console, { fetch: net.fetch.bind(net) }); if (det.info) det.info.uiLang = I18N.lang; if (!det.info) log?.write('INFO', `fiche ${title} : aucun jeu correspondant sur Wikidata`); }
     catch (e) { det.infoError = e.message; log?.write('INFO', `fiche ${title} : ${e.message}`); }
   }
   if (det.info) {

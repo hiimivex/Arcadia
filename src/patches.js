@@ -67,6 +67,18 @@ function ps1Sixty(...chtTexts) {
   return lines;
 }
 
+// Patch écran large 16:9 d'un jeu PS1 (base DuckStation), même format que ps1Sixty
+const IS_WIDE = /widescreen|16\s*:\s*9/i;
+function ps1Wide(...chtTexts) {
+  for (const t of chtTexts) {
+    for (const s of parseCht(t)) {
+      if (!IS_WIDE.test(s.name) || UNSAFE.test(s.name) || s.options || !/gameshark/i.test(s.type || 'gameshark') || !s.codes.length) continue;
+      return [`# ${s.name}`, s.codes.join('+')];
+    }
+  }
+  return [];
+}
+
 // Les 15 jeux les plus joués en émulation, par console (patchs préparés même s'ils ne sont pas dans la bibliothèque)
 const TOP = {
   SWITCH: ['01007EF00011E000', '0100F2C0115B6000', '0100000000010000', '0100152000022000', '01006A800016E000', '01006F8002326000', '0100A3D008C5C000',
@@ -77,4 +89,4 @@ const TOP = {
     'ULUS-10566', 'ULUS-10202', 'ULUS-10025', 'UCUS-98751', 'ULUS-10490']
 };
 
-module.exports = { PSP_DB_URL, PS1_RAW, TOP, dashSerial, plainSerial, parsePspDb, pickPsp60, pspIni, parseCht, ps1Sixty };
+module.exports = { PSP_DB_URL, PS1_RAW, TOP, dashSerial, plainSerial, parsePspDb, pickPsp60, pspIni, parseCht, ps1Sixty, ps1Wide };
