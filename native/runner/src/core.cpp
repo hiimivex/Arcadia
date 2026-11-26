@@ -19,6 +19,7 @@ bool Core::open(const std::string& path, std::string& err) {
     && sym(lib, reset, "retro_reset") && sym(lib, run, "retro_run")
     && sym(lib, serialize_size, "retro_serialize_size") && sym(lib, serialize, "retro_serialize") && sym(lib, unserialize, "retro_unserialize")
     && sym(lib, load_game, "retro_load_game") && sym(lib, unload_game, "retro_unload_game");
+  if (ok) { cheat_reset = (decltype(cheat_reset))SDL_LoadFunction(lib, "retro_cheat_reset"); cheat_set = (decltype(cheat_set))SDL_LoadFunction(lib, "retro_cheat_set"); } // facultatifs
   if (!ok) { err = "Ce fichier n'est pas un cœur libretro valide."; return false; }
   if (api_version() != RETRO_API_VERSION) { err = "Version d'API libretro incompatible."; return false; }
   get_system_info(&info);

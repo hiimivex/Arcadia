@@ -134,7 +134,7 @@ async function sgdbHero(title, key, opts = {}) {
   const game = (s.data || [])[0];
   if (!game) return null;
   const h = await get(`https://www.steamgriddb.com/api/v2/heroes/game/${game.id}?types=static&nsfw=false&humor=false`, auth);
-  const hero = (h.data || []).sort((a, b) => (b.score || 0) - (a.score || 0))[0];
+  const hero = (h.data || []).filter(x => (x.width || 0) >= 1920).sort((a, b) => (b.score || 0) - (a.score || 0) || (b.width || 0) - (a.width || 0))[0]; // grandes bannières nettes seulement
   return hero ? { url: hero.url, game: game.name } : null;
 }
 

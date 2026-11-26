@@ -23,21 +23,31 @@ static void focusPrev() { ImGuiWindow* w = ImGui::GetCurrentWindow(); ImGui::Foc
 static bool HOV() { return mouseActive && ImGui::IsItemHovered(); }
 
 enum { SEC_RESUME, SEC_SAVES, SEC_IMAGE, SEC_SOUND, SEC_PAD, SEC_ADV, SEC_CHEAT, SEC_RESTART, SEC_QUIT, SEC_COUNT };
-static const char* kSecLabel[SEC_COUNT] = { "Reprendre", "Sauvegardes", "Image", "Son", "Manette", "Avancé", "Cheat", "Redémarrer", "Quitter le jeu" };
+static const char* kSecLabel[SEC_COUNT] = { "Reprendre", "Sauvegardes", "Vidéo", "Son", "Contrôles", "Avancé", "Cheat", "Redémarrer", "Quitter le jeu" };
 static const char* kSecIcon[SEC_COUNT]  = { "\xE2\x96\xB6", "\xE2\x97\x86", "\xE2\x97\x90", "\xE2\x99\xAA", "\xE2\x9C\xA6", "\xE2\x89\xA1", "\xE2\x98\x85", "\xE2\x86\xBB", "\xE2\x9C\x95" };
 
 static ImU32 W(float a) { return IM_COL32(255, 255, 255, (int)(255 * std::clamp(a, 0.f, 1.f))); }
-static ImU32 K(float a) { return IM_COL32(12, 12, 14, (int)(255 * std::clamp(a, 0.f, 1.f))); }
+static ImU32 K(float a) { return IM_COL32(4, 17, 15, (int)(255 * std::clamp(a, 0.f, 1.f))); }
+// Couleur des boutons d'Arcadia (thème Néon : menthe par défaut, ou celle choisie dans Arcadia via ARCADIA_ACCENT=#rrggbb)
+static int accentRGB[3] = { 57, 229, 200 };
+static void loadAccent() {
+  const char* a = SDL_getenv("ARCADIA_ACCENT");
+  unsigned v = 0;
+  if (a && a[0] == '#' && SDL_strlen(a) == 7 && SDL_sscanf(a + 1, "%x", &v) == 1) { accentRGB[0] = (v >> 16) & 255; accentRGB[1] = (v >> 8) & 255; accentRGB[2] = v & 255; }
+}
+static ImU32 A(float a) { return IM_COL32(accentRGB[0], accentRGB[1], accentRGB[2], (int)(255 * std::clamp(a, 0.f, 1.f))); }
 
 // Halo doux autour d'un rectangle arrondi (empilement de contours transparents)
 static void glow(ImDrawList* dl, ImVec2 a, ImVec2 b, float r, float strength = 1.f) {
+  r = std::min(r, 3.f * S); // angles nets
   for (int i = 1; i <= 10; i++) {
     float e = i * 2.2f * S;
-    dl->AddRect(ImVec2(a.x - e, a.y - e), ImVec2(b.x + e, b.y + e), W(0.045f * strength * (1.f - i / 11.f)), r + e, 0, 2.4f * S);
+    dl->AddRect(ImVec2(a.x - e, a.y - e), ImVec2(b.x + e, b.y + e), A(0.05f * strength * (1.f - i / 11.f)), r, 0, 2.4f * S);
   }
 }
 // Panneau « verre » : fond sombre translucide + liseré + reflet
 static void glass(ImDrawList* dl, ImVec2 a, ImVec2 b, float r, float alpha = 0.72f) {
+  r = std::min(r, 3.f * S);
   dl->AddRectFilled(ImVec2(a.x, a.y + 10 * S), ImVec2(b.x, b.y + 18 * S), IM_COL32(0, 0, 0, 70), r);
   dl->AddRectFilled(a, b, K(alpha), r);
   dl->AddRectFilledMultiColor(a, ImVec2(b.x, a.y + std::min(90.f * S, (b.y - a.y) * .5f)), W(.035f), W(.035f), W(0), W(0));
@@ -58,8 +68,8 @@ static bool pill(const char* id, const char* icon, const char* label, bool curre
   ImGui::EndDisabled();
   bool hot = enabled && (ImGui::IsItemFocused() || HOV());
   ImDrawList* dl = ImGui::GetWindowDrawList();
-  ImVec2 q(p.x + w, p.y + h); float r = h * .5f;
-  if (hot) { glow(dl, p, q, r, 1.2f); dl->AddRectFilled(p, q, W(.96f), r); }
+  ImVec2 q(p.x + w, p.y + h); float r = 2.f * S;
+  if (hot) { glow(dl, p, q, r, 1.2f); dl->AddRectFilled(p, q, A(1), r); }
   else if (current) dl->AddRectFilled(p, q, W(.10f), r);
   else dl->AddRectFilled(p, q, W(.035f), r);
   ImU32 tc = hot ? K(1) : enabled ? W(current ? 1 : .82f) : W(.28f);
@@ -77,15 +87,15 @@ static bool row(const char* id, const char* label, const char* value, const char
   ImVec2 p = ImGui::GetCursorScreenPos();
   bool pressed = ImGui::InvisibleButton("##r", ImVec2(w, h));
   bool hot = ImGui::IsItemFocused() || HOV();
-  ImDrawList* dl = ImGui::GetWindowDrawList(); ImVec2 q(p.x + w, p.y + h); float r = 20 * S;
-  if (hot) { glow(dl, p, q, r, .8f); dl->AddRectFilled(p, q, W(.12f), r); dl->AddRect(p, q, W(.55f), r, 0, 1.5f * S); }
+  ImDrawList* dl = ImGui::GetWindowDrawList(); ImVec2 q(p.x + w, p.y + h); float r = 2.f * S;
+  if (hot) { glow(dl, p, q, r, .8f); dl->AddRectFilled(p, q, A(.10f), r); dl->AddRect(p, q, A(.9f), r, 0, 1.5f * S); }
   else dl->AddRectFilled(p, q, W(.045f), r);
   text(dl, fReg, 22, ImVec2(p.x + 26 * S, p.y + (hint ? 13 : 23) * S), W(.92f), label);
   if (hint) text(dl, fReg, 16, ImVec2(p.x + 26 * S, p.y + 43 * S), W(.45f), hint);
   if (value) {
     ImVec2 ts = textSize(fBold, 21, value);
     ImVec2 a(q.x - ts.x - 54 * S, p.y + 19 * S), b(q.x - 18 * S, q.y - 19 * S);
-    dl->AddRectFilled(a, b, hot ? W(.95f) : W(.08f), (b.y - a.y) * .5f);
+    dl->AddRectFilled(a, b, hot ? A(1) : W(.08f), 2.f * S);
     text(dl, fBold, 21, ImVec2(a.x + 18 * S, p.y + (h - 22 * S) * .5f), hot ? K(1) : W(.9f), value);
   }
   ImGui::Dummy(ImVec2(0, 10 * S));
@@ -193,7 +203,7 @@ static void secSaves() {
 }
 
 static void secImage() {
-  heading("Image", g_app.perGame ? "Réglages propres à ce jeu" : "Réglages communs à tous les jeux de cette console");
+  heading("Vidéo", g_app.perGame ? "Réglages propres à ce jeu" : "Réglages communs à tous les jeux de cette console");
   bool pg = g_app.perGame;
   if (toggleRow("pg", "Réglages pour ce jeu uniquement", pg, "Sinon, ils s'appliquent à toute la console")) g_app.perGame = pg;
   // options du moteur mises en avant (résolution interne, écrans DS…)
@@ -225,47 +235,114 @@ static void secSound() {
   if (toggleRow("pf", "Pause quand Arcadia passe en arrière-plan", pf)) g_app.cfg.setb("pausefocus", pf);
 }
 
+// Nom d'une action selon la famille de la console (Switch : A B X Y ; PlayStation : Rond Croix…)
+static const char* actionLabel(int a) {
+  namespace AC = ArcadiaControls;
+  const std::string& c = g_app.console;
+  bool sony = c.rfind("PS", 0) == 0;
+  static const char* nin[] = { "A", "B", "X", "Y", "L", "R", "ZL", "ZR", "Start (+)", "Select (\xE2\x88\x92)" };
+  static const char* ps[] = { "Rond", "Croix", "Triangle", "Carré", "L1", "R1", "L2", "R2", "Start", "Select" };
+  static const char* rest[] = { "Clic stick gauche", "Clic stick droit", "Croix \xE2\x86\x91", "Croix \xE2\x86\x93", "Croix \xE2\x86\x90", "Croix \xE2\x86\x92", "Home",
+    "Stick gauche \xE2\x86\x91", "Stick gauche \xE2\x86\x93", "Stick gauche \xE2\x86\x90", "Stick gauche \xE2\x86\x92",
+    "Stick droit \xE2\x86\x91", "Stick droit \xE2\x86\x93", "Stick droit \xE2\x86\x90", "Stick droit \xE2\x86\x92" };
+  if (a < AC::L3) return sony ? ps[a] : nin[a];
+  return rest[a - AC::L3];
+}
+
 static void secPad() {
+  namespace AC = ArcadiaControls;
   SDL_Gamepad* g = g_app.pads[0];
   std::string head = g ? std::string("Manette : ") + (SDL_GetGamepadName(g) ? SDL_GetGamepadName(g) : "manette") : std::string("Aucune manette branchée");
-  heading(head.c_str(), "La manette et le clavier marchent en même temps : utilise celui que tu veux, quand tu veux.");
+  heading("Contrôles", head.c_str());
+  if (!g_app.controls.loaded) g_app.controls = AC::Defaults(false);
+  auto save = [] { if (!g_app.ctlWatch.path.empty()) { AC::Save(g_app.ctlWatch.path, g_app.controls); g_app.ctlWatch.Touch(); } };
+  static const char* devLabel[4] = { "Clavier + manette", "Clavier seul", "Manette seule", "Stick arcade" };
+  static const char* devHint[4] = { "Les deux marchent en même temps.", "La manette est ignorée.", "Le clavier est ignoré.", "Levier et boutons d'arcade : le levier pilote aussi le stick gauche." };
+  if (row("dev", "Jouer avec", devLabel[g_app.controls.device], devHint[g_app.controls.device])) { g_app.controls.device = (AC::Device)((g_app.controls.device + 1) % 4); save(); }
   if (row("calib", "Calibrer ma manette", g_app.calibState ? "En cours…" : "\xE2\x86\xB5", "« Appuie sur A » : reconnue en une seconde, sinon touche par touche. Vaut pour tous les jeux.")) { if (!g_app.calibState) g_app.calibrate(); }
   int dz = g_app.cfg.geti("deadzone", 15);
   if (sliderRow("dz", "Zone morte des sticks", dz, 0, 40, "%d %%")) g_app.cfg.seti("deadzone", dz);
   bool vib = g_app.cfg.getb("vibration", true);
   if (toggleRow("vib", "Vibrations", vib)) g_app.cfg.setb("vibration", vib);
+
+  // Réattribution : une ligne par action, case clavier et case manette ; clique puis appuie (Échap = annuler)
+  const bool showKb = g_app.controls.device != AC::PAD && g_app.controls.device != AC::STICK;
+  const bool showPad = g_app.controls.device != AC::KEYBOARD;
+  ImDrawList* dl0 = ImGui::GetWindowDrawList();
+  ImGui::Dummy(ImVec2(0, 8 * S));
+  { ImVec2 hp = ImGui::GetCursorScreenPos(); float w = ImGui::GetContentRegionAvail().x;
+    text(dl0, fBold, 22, hp, W(.9f), "Touches");
+    if (showKb) text(dl0, fReg, 16, ImVec2(hp.x + w * .535f - textSize(fReg, 16, "Clavier").x * .5f, hp.y + 6 * S), W(.5f), "Clavier");
+    if (showPad) text(dl0, fReg, 16, ImVec2(hp.x + w * .84f - textSize(fReg, 16, "Manette").x * .5f, hp.y + 6 * S), W(.5f), "Manette"); }
+  ImGui::Dummy(ImVec2(0, 36 * S));
+  auto chip = [&](const char* id, ImVec2 a, ImVec2 b, const std::string& v, bool active) {
+    ImGui::SetCursorScreenPos(a);
+    bool pressed = ImGui::InvisibleButton(id, ImVec2(b.x - a.x, b.y - a.y));
+    bool hot = ImGui::IsItemFocused() || HOV();
+    ImDrawList* dl = ImGui::GetWindowDrawList(); float r = (b.y - a.y) * .5f;
+    if (active) { glow(dl, a, b, r, 1.f); dl->AddRectFilled(a, b, W(.95f), r); }
+    else if (hot) { dl->AddRectFilled(a, b, W(.2f), r); dl->AddRect(a, b, W(.6f), r, 0, 1.5f * S); }
+    else dl->AddRectFilled(a, b, W(.07f), r);
+    ImVec2 ts = textSize(fBold, 17, v.c_str());
+    text(dl, fBold, 17, ImVec2(a.x + (b.x - a.x - ts.x) * .5f, a.y + (b.y - a.y - 18 * S) * .5f), active ? K(1) : W(.88f), v.c_str());
+    return pressed;
+  };
+  auto labelOf = [](const std::vector<int>& l, bool kb) {
+    std::string v; for (size_t i = 0; i < l.size(); i++) v += (i ? " / " : "") + (kb ? AC::KeyLabel(l[i]) : AC::PadLabel(l[i]));
+    return v.empty() ? std::string("\xE2\x80\x94") : v;
+  };
+  for (int a = 0; a < AC::COUNT; a++) {
+    bool padRow = a < AC::HOME; // les sticks de la manette restent des sticks
+    if (!showKb && !padRow) continue;
+    ImGui::PushID(a);
+    float w = ImGui::GetContentRegionAvail().x, h = 48 * S;
+    ImVec2 p = ImGui::GetCursorScreenPos();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    if (a % 2 == 0) dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), W(.025f), 12 * S);
+    text(dl, fReg, 19, ImVec2(p.x + 18 * S, p.y + 13 * S), W(.9f), actionLabel(a));
+    if (showKb) {
+      bool cap = g_app.capAction == a && g_app.capKeyboard;
+      if (chip("k", ImVec2(p.x + w * .40f, p.y + 7 * S), ImVec2(p.x + w * .67f, p.y + h - 7 * S), cap ? "Appuie sur une touche…" : labelOf(g_app.controls.kb[a], true), cap))
+        { g_app.capAction = a; g_app.capKeyboard = true; g_app.capT0 = SDL_GetTicks(); }
+    }
+    if (showPad && padRow) {
+      bool cap = g_app.capAction == a && !g_app.capKeyboard;
+      if (chip("p", ImVec2(p.x + w * .70f, p.y + 7 * S), ImVec2(p.x + w * .98f, p.y + h - 7 * S), cap ? "Appuie sur un bouton…" : labelOf(g_app.controls.pad[a], false), cap))
+        { g_app.capAction = a; g_app.capKeyboard = false; g_app.capT0 = SDL_GetTicks(); }
+    }
+    ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + h + 4 * S));
+    ImGui::Dummy(ImVec2(w, 0));
+    ImGui::PopID();
+  }
+  ImGui::Dummy(ImVec2(0, 6 * S));
+  if (row("ctlreset", "Rétablir les touches d'origine", nullptr, "Clavier et manette, pour toutes les parties de cette console.")) {
+    AC::Device d = g_app.controls.device; g_app.controls = AC::Defaults(g_app.console == "SWITCH" || g_app.console == "SWITCH 2"); g_app.controls.device = d; save();
+    g_app.toast("Touches d'origine rétablies");
+  }
+
   ImGui::Dummy(ImVec2(0, 8 * S));
   ImDrawList* dl = ImGui::GetWindowDrawList(); ImVec2 p = ImGui::GetCursorScreenPos();
-  auto list = [&](const char* title, std::vector<std::pair<std::string, std::string>> items) {
-    text(dl, fBold, 22, p, W(.9f), title);
-    float y = p.y + 42 * S;
-    for (auto& s : items) {
-      ImVec2 ts = textSize(fBold, 17, s.first.c_str());
-      dl->AddRectFilled(ImVec2(p.x, y), ImVec2(p.x + ts.x + 24 * S, y + 32 * S), W(.09f), 16 * S);
-      text(dl, fBold, 17, ImVec2(p.x + 12 * S, y + 6 * S), W(.9f), s.first.c_str());
-      text(dl, fReg, 18, ImVec2(p.x + ts.x + 40 * S, y + 6 * S), W(.6f), s.second.c_str());
-      y += 42 * S;
-    }
-    p.y = y + 18 * S;
-  };
-  // touches du clavier avec les lettres de TON clavier (AZERTY, QWERTY…)
-  auto k = [](SDL_Scancode sc) { const char* n = SDL_GetKeyName(SDL_GetKeyFromScancode(sc, SDL_KMOD_NONE, false)); return std::string(n && *n ? n : "?"); };
-  list("Clavier", {
-    { "\xE2\x86\x91 \xE2\x86\x93 \xE2\x86\x90 \xE2\x86\x92", "Croix directionnelle" }, { k(SDL_SCANCODE_X), "Bouton A" }, { k(SDL_SCANCODE_Z), "Bouton B" },
-    { k(SDL_SCANCODE_S), "Bouton X" }, { k(SDL_SCANCODE_A), "Bouton Y" }, { k(SDL_SCANCODE_Q) + " / " + k(SDL_SCANCODE_W), "L / R" },
-    { "Entrée / Retour arrière", "Start / Select" }, { "Souris", "Écran tactile (DS, 3DS)" },
-    { "Échap · F5 · F8 · F12 · Tab", "Menu · sauver · charger · capture · turbo" } });
-  list("Manette", {
+  text(dl, fBold, 22, p, W(.9f), "Raccourcis");
+  float y = p.y + 42 * S;
+  std::vector<std::pair<std::string, std::string>> items = {
+    { "Échap · F5 · F8 · F12 · Tab", "Menu · sauver · charger · capture · turbo" }, { "Souris", "Écran tactile (DS, 3DS)" },
     { "Guide", "Ouvrir / fermer ce menu" }, { "Back + Start (maintenus)", "Quitter le jeu" },
-    { "Guide + RB", "Turbo ×2" }, { "Guide + Back", "Ralenti ×0,5" }, { "Guide + X", "Sauvegarder maintenant" },
+    { "Guide + RB", "Turbo \xC3\x97" "2" }, { "Guide + Back", "Ralenti \xC3\x97" "0,5" }, { "Guide + X", "Sauvegarder maintenant" },
     { "Guide + Y", "Capture d'écran" }, { "Guide + LB", "Filtre net / lisse" }, { "Guide + \xE2\x86\x91 / \xE2\x86\x93", "Volume" }, { "Guide + \xE2\x86\x92", "Couper le son" },
-    { "Stick droit (DS)", "Curseur de l'écran tactile · clic du stick = toucher" } });
-  ImGui::Dummy(ImVec2(0, p.y - ImGui::GetCursorScreenPos().y));
+    { "Stick droit (DS)", "Curseur de l'écran tactile · clic du stick = toucher" } };
+  for (auto& s2 : items) {
+    ImVec2 ts = textSize(fBold, 17, s2.first.c_str());
+    dl->AddRectFilled(ImVec2(p.x, y), ImVec2(p.x + ts.x + 24 * S, y + 32 * S), W(.09f), 16 * S);
+    text(dl, fBold, 17, ImVec2(p.x + 12 * S, y + 6 * S), W(.9f), s2.first.c_str());
+    text(dl, fReg, 18, ImVec2(p.x + ts.x + 40 * S, y + 6 * S), W(.6f), s2.second.c_str());
+    y += 42 * S;
+  }
+  ImGui::Dummy(ImVec2(0, y + 18 * S - ImGui::GetCursorScreenPos().y));
 }
 
 // Aide « Contrôles » quelques secondes au début de la partie
 static void drawControlsHint() {
-  if (!g_app.cfg.getb("controlshint", true) || g_app.menuOpen || g_app.resumePrompt) return;
+  if (g_app.hintOff || !g_app.cfg.getb("controlshint", true) || g_app.menuOpen || g_app.resumePrompt) return;
   if (!g_app.hintT0) g_app.hintT0 = SDL_GetTicks();
   float t = (SDL_GetTicks() - g_app.hintT0) / 1000.f;
   if (t > 7.5f) return;
@@ -273,7 +350,7 @@ static void drawControlsHint() {
   ImDrawList* fg = ImGui::GetForegroundDrawList(); ImVec2 ds = ImGui::GetIO().DisplaySize;
   SDL_Gamepad* g = g_app.pads[0];
   std::string l1 = std::string("\xE2\x9C\xA6  ") + (g ? (SDL_GetGamepadName(g) ? SDL_GetGamepadName(g) : "Manette") : "Branche une manette quand tu veux") + "      \xE2\x8C\xA8  Clavier";
-  const char* l2 = "Les deux marchent en même temps. Échap ou Guide : menu → Manette pour calibrer ou voir les touches.";
+  const char* l2 = "Les deux marchent en même temps. Échap ou Guide : menu → Contrôles pour changer les touches ou calibrer.";
   float w = std::max(textSize(fBold, 20, l1.c_str()).x, textSize(fReg, 17, l2).x) + 56 * S, h = 92 * S;
   ImVec2 p0(36 * S, ds.y - h - 40 * S), p1(p0.x + w, p0.y + h);
   for (int i = 1; i <= 8; i++) { float e = i * 2 * S; fg->AddRect(ImVec2(p0.x - e, p0.y - e), ImVec2(p1.x + e, p1.y + e), W(.04f * a * (1 - i / 9.f)), 26 * S + e, 0, 2 * S); }
@@ -489,6 +566,7 @@ static const char* firstExisting(std::initializer_list<const char*> l) { for (au
 void uiInit() {
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
+  loadAccent();
   ImGuiIO& io = ImGui::GetIO();
   io.IniFilename = nullptr; io.LogFilename = nullptr;
   io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad | ImGuiConfigFlags_NavEnableKeyboard;

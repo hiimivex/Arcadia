@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'">
+<title>Arcadia · images/s</title>
+<style>
+  @font-face { font-family: 'JetBrains Mono'; font-weight: 600; src: url('fonts/jetbrains-mono-latin-600-normal.woff2') format('woff2'); }
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; user-select: none; font-family: 'JetBrains Mono', Consolas, monospace; }
+  .box { position: absolute; inset: 0; display: flex; align-items: center; gap: .55em; padding: 0 .9em; background: rgba(7, 8, 11, .72); border: 1px solid rgba(255,255,255,.08);
+    border-left: 3px solid var(--a, #39e5c8); border-radius: 2px; color: #e9f1f0; font-size: 20px; }
+  .fps { font-weight: 600; font-size: 1.25em; color: var(--a, #39e5c8); min-width: 2.2ch; text-align: right; }
+  .lbl { font-size: .55em; letter-spacing: .1em; color: #9aa8a7; display: flex; flex-direction: column; line-height: 1.25; }
+  .low .fps { color: #ffb454; }
+  body.s .box { font-size: 15px; } body.l .box { font-size: 29px; }
+</style></head>
+<body class="m">
+  <div class="box" id="box"><span class="fps" id="fps">--</span><span class="lbl"><b>FPS</b><span id="sp"></span></span></div>
+  <script src="hud.js"></script>
+</body></html>

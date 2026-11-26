@@ -20,7 +20,12 @@ Arcadia is a Windows game launcher that turns emulators into **engines**: you on
 - **External engines** for the rest (Switch, PS2, PS3, Wii U…): launched without their UI, with the Arcadia menu overlaid on top (pause, settings, save backups, language, controls).
 - **Controller *and* keyboard at the same time**, in every game. One-press controller calibration ("press A"), even in game.
 - **Game language** picked from the languages actually present in the ROM (Switch, 3DS).
-- **Library**: icons and covers read from the ROMs and free databases, favorites, categories, playtime, BigPicture mode for the TV, drag & drop import, save backups with cloud-folder sync.
+- **Library**: icons and covers read from the ROMs and free databases, favorites, categories, playtime, Couch mode for the TV, drag & drop import, save backups with cloud-folder sync.
+- **Arcadia Switch engine** (Switch 1 & 2): a fork of Lichii / Eden / yuzu (GPL-3.0) driven by Arcadia — controller + keyboard + mouse, rumble, in-game menu, live video settings. Sources: branch [`arcadia-switch-lichii`](../../tree/arcadia-switch-lichii).
+- **Automatic 60 FPS patches** for Switch, PSP and PS1 games that have one, from public community databases (NX-60FPS-RES-GFX-Cheats, CWCheat-Database-Plus, DuckStation chtdb).
+- **In-game FPS counter**, NVIDIA DLSS for Switch 2 games, custom wallpapers with automatic button palette, neon interface.
+
+> ⚠️ **Arcadia is still in development.** If something major breaks, come and tell us on [Discord](https://discord.gg/7XczndQEsG).
 
 > **Arcadia ships no games, BIOS, keys or firmware**, and never will. Use dumps of games and consoles you own. Arcadia is not affiliated with Nintendo, Sony, Microsoft or any console maker.
 
@@ -58,7 +63,7 @@ native/build-windows.sh   # fetches SDL3, Dear ImGui, stb, builds runner/arcadia
 Arcadia is free software under the **GNU GPL v3.0** (see `LICENSE`).
 It stands on the shoulders of PPSSPP, melonDS, Azahar/Citra, PCSX ReARMed, Mesen, bsnes, mGBA, Eden, SDL, Dear ImGui and stb: full list and licenses in [`runner/LICENCES.txt`](runner/LICENCES.txt).
 
-Made solo by **Ivex**. Questions, bugs, a game that won't start: [Discord](https://discord.gg/PKw6MyzzzD).
+Made solo by **Ivex**. Questions, bugs, a game that won't start: [Discord](https://discord.gg/7XczndQEsG).
 
 ---
 
@@ -73,4 +78,4 @@ Arcadia est un lanceur de jeux pour Windows qui transforme les émulateurs en **
 
 **Arcadia ne fournit aucun jeu, BIOS, clé ni firmware.** Utilise les copies de tes propres jeux et consoles.
 
-Projet solo créé par **Ivex** — contact : [Discord](https://discord.gg/PKw6MyzzzD).
+Projet solo créé par **Ivex** — contact : [Discord](https://discord.gg/7XczndQEsG).

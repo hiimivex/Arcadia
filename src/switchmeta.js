@@ -78,17 +78,37 @@ function xciSecure(fd) {
 }
 
 // ---------------------------------------------------------------- crypto NCA
-function xtsDecrypt(key, data, sector0) {
-  const out = Buffer.alloc(data.length);
+// AES-128-XTS écrit à la main avec AES-ECB : le Node d'Electron (BoringSSL) ne fournit pas « aes-128-xts ».
+// key = 32 octets (clé données | clé tweak) ; secteurs de 0x200 octets ; tweak Nintendo = n° de secteur big-endian.
+function aesEcb(encrypt, key, data) {
+  const c = encrypt ? crypto.createCipheriv('aes-128-ecb', key, null) : crypto.createDecipheriv('aes-128-ecb', key, null);
+  c.setAutoPadding(false);
+  return Buffer.concat([c.update(data), c.final()]);
+}
+function xtsMasks(k2, sector, blocks) {
+  const tw = Buffer.alloc(16); tw.writeBigUInt64BE(BigInt(sector), 8);
+  let t = aesEcb(true, k2, tw);
+  const masks = Buffer.alloc(blocks * 16);
+  for (let j = 0; j < blocks; j++) {
+    t.copy(masks, j * 16);
+    let carry = 0; // multiplication par α dans GF(2^128), petit-boutiste
+    for (let i = 0; i < 16; i++) { const v = t[i]; t[i] = ((v << 1) | carry) & 0xff; carry = v >> 7; }
+    if (carry) t[0] ^= 0x87;
+  }
+  return masks;
+}
+function xtsCrypt(encrypt, key, data, sector0) {
+  const k1 = key.subarray(0, 16), k2 = key.subarray(16, 32), out = Buffer.alloc(data.length);
   for (let s = 0; s * 0x200 < data.length; s++) {
-    const tweak = Buffer.alloc(16);
-    tweak.writeBigUInt64BE(BigInt(sector0 + s), 8); // tweak Nintendo : numéro de secteur big-endian
-    const d = crypto.createDecipheriv('aes-128-xts', key, tweak);
-    d.setAutoPadding(false);
-    Buffer.concat([d.update(data.subarray(s * 0x200, (s + 1) * 0x200)), d.final()]).copy(out, s * 0x200);
+    const chunk = data.subarray(s * 0x200, (s + 1) * 0x200), n = chunk.length >> 4;
+    const m = xtsMasks(k2, sector0 + s, n), x = Buffer.alloc(n * 16);
+    for (let i = 0; i < n * 16; i++) x[i] = chunk[i] ^ m[i];
+    const y = aesEcb(encrypt, k1, x);
+    for (let i = 0; i < n * 16; i++) out[s * 0x200 + i] = y[i] ^ m[i];
   }
   return out;
 }
+function xtsDecrypt(key, data, sector0) { return xtsCrypt(false, key, data, sector0); }
 function ecb(key, data) {
   const d = crypto.createDecipheriv('aes-128-ecb', key, null);
   d.setAutoPadding(false);
@@ -231,4 +251,4 @@ function switchIdNoKeys(file) {
   } finally { fs.closeSync(fd); }
 }
 
-module.exports = { parseKeys, loadKeys, switchInfo, switchIdNoKeys, readPartition, nacpTitle, LANGS };
+module.exports = { xtsCrypt, parseKeys, loadKeys, switchInfo, switchIdNoKeys, readPartition, nacpTitle, LANGS };

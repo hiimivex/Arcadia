@@ -17,12 +17,27 @@ Composants inclus
 - Mesen (cœur NES) © Sour — GPL-3.0 — https://github.com/libretro/Mesen
 - bsnes (cœur Super Nintendo) © byuu et contributeurs — GPL-3.0 — https://github.com/libretro/bsnes
 - mGBA (cœur Game Boy / Color / Advance) © Jeffrey Pfau — MPL-2.0 — https://github.com/mgba-emu/mgba
+- Mupen64Plus-Next (cœur Nintendo 64) — GPL-2.0 — https://github.com/libretro/mupen64plus-libretro-nx
+- SwanStation (cœur PS1 haute définition, utilisé quand un BIOS PS1 est installé) — GPL-3.0 — https://github.com/libretro/swanstation
+- Flycast (cœur Dreamcast) — GPL-2.0 — https://github.com/flyinghead/flycast
+- LRPS2 (cœur PlayStation 2, dérivé de PCSX2) — GPL-3.0 — https://github.com/libretro/ps2
+- Dolphin (cœur GameCube / Wii, dossier system/dolphin-emu/Sys) — GPL-2.0 ou ultérieure — https://github.com/libretro/dolphin
 - FFmpeg (décodage vidéo/audio, intégré au cœur PPSSPP) — LGPL-2.1 ou ultérieure
   Sources : https://github.com/hrydgard/ppsspp-ffmpeg
 - SDL 3 (fenêtre, son, manettes) — licence zlib — https://github.com/libsdl-org/SDL
 - Dear ImGui (menu en jeu) — licence MIT — https://github.com/ocornut/imgui
 - stb_image / stb_image_write — domaine public / MIT — https://github.com/nothings/stb
 - libwinpthread (MinGW-w64) — licence MIT/ZPL
+- libgcc / libstdc++ (GCC) — GPL-3.0 avec exception de bibliothèque d'exécution
+
+Moteur Switch d'Arcadia (switch/arcadia-switch.exe) — Switch et Switch 2
+-------------------------------------------------------------------------
+Basé sur Lichii © Lichii Emulator Project, lui-même dérivé d'Eglantine, d'Eden © Eden Emulator Project
+et de yuzu © yuzu Emulator Project — GPL-3.0 ou ultérieure.
+Sources de Lichii : https://github.com/zortos293/Lichii (version 66c555a).
+Modifications d'Arcadia (manette + clavier fusionnés, vibrations, dossier de données, nom et icône) :
+https://github.com/hiimivex/Arcadia/tree/arcadia-switch-lichii
+Bibliothèques intégrées (SDL3, OpenSSL, Boost, FFmpeg, Opus, LZ4, Zstd, zlib…) : chacune sous sa propre licence.
 
 Arcadia peut aussi piloter des émulateurs installés à côté (Eden, Azahar, PCSX2,
 Dolphin, Cemu, RPCS3, Vita3K…) : ils restent la propriété de leurs auteurs et

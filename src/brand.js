@@ -3,6 +3,12 @@
 const fs = require('fs');
 const path = require('path');
 
+// resedit est un module ES : sous Electron (Node 20) il se charge de façon asynchrone, une fois au démarrage
+let ResEdit = null, loadError = null;
+const ready = (() => { try { return require('resedit/cjs').load().then(m => { ResEdit = m; }).catch(e => { loadError = e.message; }); } catch (e) { loadError = e.message; return Promise.resolve(); } })();
+
+
+let lastError = null;
 function brandedExe(exe, name, iconFile, { description = 'Arcadia' } = {}) {
   if (process.platform !== 'win32' || !exe || !fs.existsSync(exe) || !fs.existsSync(iconFile)) return exe;
   const out = path.join(path.dirname(exe), name);
@@ -10,8 +16,8 @@ function brandedExe(exe, name, iconFile, { description = 'Arcadia' } = {}) {
   const src = fs.statSync(exe);
   const sig = `${src.size}:${Math.round(src.mtimeMs)}:${description}:v2`;
   try { if (fs.existsSync(out) && fs.readFileSync(stamp, 'utf8') === sig) return out; } catch { /* à refaire */ }
+  if (!ResEdit) { lastError = loadError || 'module d\'icônes pas encore chargé'; return exe; }
   try {
-    const ResEdit = require('resedit');
     const bin = ResEdit.NtExecutable.from(fs.readFileSync(exe), { ignoreCert: true });
     const res = ResEdit.NtExecutableResource.from(bin);
     const ico = ResEdit.Data.IconFile.from(fs.readFileSync(iconFile));
@@ -29,7 +35,7 @@ function brandedExe(exe, name, iconFile, { description = 'Arcadia' } = {}) {
     fs.renameSync(out + '.tmp', out);
     fs.writeFileSync(stamp, sig);
     return out;
-  } catch { try { fs.unlinkSync(out + '.tmp'); } catch { /* rien */ } return exe; }
+  } catch (e) { lastError = e.message; try { fs.unlinkSync(out + '.tmp'); } catch { /* rien */ } return exe; }
 }
 
-module.exports = { brandedExe };
+module.exports = { brandedExe, ready, lastError: () => lastError };

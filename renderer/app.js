@@ -47,12 +47,13 @@ function fmtSize(b) {
 const byTitle = (a, b) => a.title.localeCompare(b.title, 'fr', { sensitivity: 'base', numeric: true });
 
 let toastTimer;
-function toast(msg, isError) {
+function toast(msg, isError, action) {
   const t = $('#toast');
   t.textContent = msg;
   t.className = 'toast' + (isError ? ' error' : '');
+  if (action) { const b = el('button', 'toast-act', action.label); b.onclick = () => { t.classList.add('hidden'); action.fn(); }; t.append(b); }
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.add('hidden'), 4000);
+  toastTimer = setTimeout(() => t.classList.add('hidden'), action ? 9000 : 4000);
 }
 
 // ------------------------------------------------------------ images
@@ -68,13 +69,13 @@ function smallIcon(g) {
   }
   return el('span', 'row-ico ph', initials(g.title));
 }
-function bigArt(g) {
+function bigArt(g, label = true) {
   if (g.cover && g.coverSquare) { // icône eShop carrée : fond flouté + icône entière
     const sq = el('div', 'sq-art');
     sq.style.setProperty('--bg', `url("${mediaUrl(g.cover)}")`);
     const img = el('img');
     img.src = mediaUrl(g.cover); img.loading = 'lazy'; img.alt = g.title; img.draggable = false;
-    sq.append(img, el('div', 'ph-title', g.title));
+    sq.append(img); if (label) sq.append(el('div', 'ph-title', g.title));
     return sq;
   }
   if (g.cover) {
@@ -88,7 +89,7 @@ function bigArt(g) {
     const img = el('img');
     img.src = mediaUrl(g.icon); img.loading = 'lazy'; img.alt = g.title; img.draggable = false;
     img.onload = () => { if (img.naturalWidth && img.naturalHeight) ic.classList.toggle('wide', img.naturalWidth / img.naturalHeight > 1.15); };
-    ic.append(img, el('div', 'ph-title', g.title));
+    ic.append(img); if (label) ic.append(el('div', 'ph-title', g.title));
     return ic;
   }
   const ph = el('div', 'ph-art');
@@ -97,7 +98,7 @@ function bigArt(g) {
     img.src = mediaUrl(g.icon); img.alt = ''; img.draggable = false;
     ph.append(img);
   } else ph.append(el('div', 'ph-letter', initials(g.title)));
-  ph.append(el('div', 'ph-title', g.title));
+  if (label) ph.append(el('div', 'ph-title', g.title));
   return ph;
 }
 
@@ -278,12 +279,13 @@ function renderGame() {
   const bg = $('#hero-bg');
   bg.style.backgroundImage = g.cover || g.icon ? `url("${mediaUrl(g.cover || g.icon)}")` : '';
   bg.style.backgroundColor = '#111';
-  $('#hero-art').replaceChildren(bigArt(g));
+  $('#hero-art').replaceChildren(bigArt(g, false)); // le titre est déjà affiché en grand à côté
   const pill = $('#hero-console');
   pill.textContent = c.name.toUpperCase();
 
   $('#hero-title').textContent = g.title;
-  $('#hero-inner').textContent = g.innerTitle && g.innerTitle.toLowerCase() !== g.title.toLowerCase() ? g.innerTitle : '';
+  const norm = t => String(t || '').toLowerCase().normalize('NFD').replace(/[^a-z0-9]/g, '');
+  $('#hero-inner').textContent = g.innerTitle && norm(g.innerTitle) !== norm(g.title) ? g.innerTitle : ''; // seulement si vraiment différent
   const st = statOf(g.id);
   $('#g-time').textContent = fmtTime(st.playtime);
   $('#g-last').textContent = fmtDate(st.lastPlayed);
@@ -293,7 +295,7 @@ function renderGame() {
   fav.classList.toggle('on', isFav(g.id));
   fav.title = isFav(g.id) ? 'Retirer des favoris' : 'Ajouter aux favoris';
   const gsW = (S.gameSettings || {})[g.id] || {};
-  const usesRunner = (S.runnerConsoles || []).includes(g.console) && S.settings.useRunner !== false && (!gsW.emulator || gsW.emulator === 'arcadia');
+  const usesRunner = (S.runnerConsoles || []).includes(g.console) && S.settings.useRunner !== false && gsW.fallback !== S.appVersion;
   const warn = usesRunner ? null : S.status[g.console];
   $('#g-warning').textContent = warn ? `${warn} Ouvre « ⚙ Émulateurs » pour le régler.` : '';
   $('#g-warning').classList.toggle('hidden', !warn);
@@ -320,8 +322,11 @@ function renderGame() {
   // infos
   const gs = (S.gameSettings || {})[g.id] || {};
   const setup = gs.emulator ? { emulator: gs.emulator } : S.mapping[g.console];
-  if (usesRunner) $('#g-emu').textContent = 'Arcadia (moteur intégré)' + (gs.emulator ? ' (réglage du jeu)' : '');
-  else $('#g-emu').textContent = setup ? (S.emulators[setup.emulator]?.name || setup.emulator || 'Personnalisé') + (gs.emulator ? ' (réglage du jeu)' : '') + (warn && !gs.emulator ? ' (introuvable)' : '') : 'Aucun';
+  const fbOn = gs.fallback && gs.fallback === S.appVersion;
+  const fb = fbOn ? ' · moteur de secours pour ce jeu' : '';
+  if ((g.console === 'SWITCH' || g.console === 'SWITCH 2') && S.switchEngine) $('#g-emu').textContent = (fbOn ? (S.emulators[setup?.emulator]?.name || 'Lichii') : 'Arcadia Switch') + fb;
+  else if (usesRunner) $('#g-emu').textContent = 'Arcadia' + fb;
+  else $('#g-emu').textContent = setup ? (S.emulators[setup.emulator]?.name || setup.emulator || 'Personnalisé') + (warn ? ' (introuvable)' : '') : 'Aucun';
   if (g.broken) { $('#g-warning').textContent = '⚠ Ce fichier semble vide (que des zéros) : copie interrompue ou récupération ratée. Il ne se lancera pas, remplace-le par une copie saine.'; $('#g-warning').classList.remove('hidden'); }
   renderDetails(g);
   renderMulti(g);
@@ -352,9 +357,181 @@ function renderAll() {
     setTimeout(() => { if (!$('#modal').classList.contains('hidden')) return; inputModal(true); }, (window.__introAt ? 600 : 300));
   }
 }
+// Fond d'Arcadia et couleur des boutons
+async function applyBackground() {
+  const st = S.settings, root = document.documentElement;
+  root.classList.toggle('bg-custom', st.bgMode === 'custom' && !!st.bgImage);
+  root.classList.toggle('bg-transparent', st.bgMode === 'transparent');
+  root.style.setProperty('--bg', st.bgMode === 'solid' ? (st.bgColor || '#0b0b0b') : '');
+  if (st.bgMode !== 'solid') root.style.removeProperty('--bg');
+  const img = $('#app-bg-img');
+  if (st.bgMode === 'custom' && st.bgImage) {
+    const url = mediaUrl(st.bgImage);
+    if (img.dataset.src !== url) { img.style.backgroundImage = `url("${url}")`; img.dataset.src = url; }
+    img.style.filter = `blur(${st.bgBlur ?? 18}px)`;
+    $('#app-bg-dim').style.opacity = (st.bgDim ?? 55) / 100;
+  }
+  let accent = null;
+  if (st.accentMode === 'custom') accent = st.accentColor;
+  else if (st.accentMode === 'windows') accent = await arcadia.windowsAccent().catch(() => null);
+  else if (st.bgMode === 'custom' && st.bgImage) accent = await imageAccent(mediaUrl(st.bgImage));
+  if (accent) { const c = readableAccent(accent); root.style.setProperty('--accent', c); root.style.setProperty('--on-accent', onAccent(c)); }
+  else { root.style.removeProperty('--accent'); root.style.removeProperty('--on-accent'); }
+  try { const cs = getComputedStyle(root); arcadia.setAccent(cs.getPropertyValue('--accent').trim(), cs.getPropertyValue('--on-accent').trim()); } catch { /* */ }
+  arcadia.uiMaterial().catch(() => {});
+}
+// Couleur dominante (vive) d'une image
+function imageAccent(url) {
+  if (imageAccent.cache && imageAccent.cache[0] === url) return Promise.resolve(imageAccent.cache[1]);
+  return new Promise(res => {
+    const im = new Image();
+    im.onload = () => {
+      const c = document.createElement('canvas'); c.width = c.height = 48;
+      const x = c.getContext('2d'); x.drawImage(im, 0, 0, 48, 48);
+      const d = x.getImageData(0, 0, 48, 48).data; let best = null, bs = -1, r = 0, g = 0, b = 0, n = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        const R = d[i], G = d[i + 1], B = d[i + 2], mx = Math.max(R, G, B), mn = Math.min(R, G, B), sat = mx ? (mx - mn) / mx : 0;
+        r += R; g += G; b += B; n++;
+        const score = sat * (mx / 255); if (score > bs) { bs = score; best = [R, G, B]; }
+      }
+      const col = bs > .25 ? best : [r / n, g / n, b / n];
+      const hex = '#' + col.map(v => Math.round(v).toString(16).padStart(2, '0')).join('');
+      imageAccent.cache = [url, hex]; res(hex);
+    };
+    im.onerror = () => res(null); im.src = url;
+  });
+}
+// Couleur assez claire pour rester lisible sur les boutons (texte sombre dessus)
+function readableAccent(hex) {
+  const m = /^#?([0-9a-f]{6})/i.exec(hex || ''); if (!m) return '#ffffff';
+  let [r, g, b] = [0, 2, 4].map(i => parseInt(m[1].slice(i, i + 2), 16));
+  const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  if (lum < 0.35) { const k = (0.35 - lum) / (1 - lum); r += (255 - r) * k; g += (255 - g) * k; b += (255 - b) * k; } // pas de bouton presque noir sur fond sombre
+  return '#' + [r, g, b].map(v => Math.round(Math.min(255, v)).toString(16).padStart(2, '0')).join('');
+}
+
+// Paramètres → Interface : fond d'Arcadia et couleur des boutons
+async function backgroundGroup() {
+  const st = S.settings, rows = [];
+  const set = async patch => { S = await arcadia.settings(patch); applyBackground(); SET.render(); };
+  rows.push(fieldEl({ label: 'Fond d\'Arcadia', type: 'select', options: [['default', 'Par défaut (sombre)'], ['custom', 'Fond personnalisé (image)'], ['solid', 'Couleur unie'], ['transparent', 'Transparence (Windows derrière)']], tip: st.bgMode === 'transparent' ? 'Effet verre de Windows 11. Sur Windows 10, le fond reste sombre.' : '' }, st.bgMode, v => set({ bgMode: v })));
+  if (st.bgMode === 'custom') {
+    const r = el('div', 'tool');
+    const td = el('div', 'td'); td.append(el('b', '', 'Image de fond'), el('div', '', st.bgImage ? st.bgImage.split(/[\\/]/).pop() : 'Aucune image choisie'));
+    const b = el('button', 'btn-white', 'Choisir un fond…'); b.onclick = () => { closeModal(); wallGallery(); };
+    r.append(td, b); rows.push(r);
+    rows.push(fieldEl({ label: 'Flou', type: 'slider', min: 0, max: 40, suffix: ' px', default: 18 }, st.bgBlur, v => { S.settings.bgBlur = v; applyBackground(); clearTimeout(backgroundGroup.t); backgroundGroup.t = setTimeout(() => arcadia.settings({ bgBlur: v }), 300); }));
+    rows.push(fieldEl({ label: 'Assombrir', type: 'slider', min: 0, max: 90, suffix: ' %', default: 55, tip: 'Garde le texte lisible.' }, st.bgDim, v => { S.settings.bgDim = v; applyBackground(); clearTimeout(backgroundGroup.t2); backgroundGroup.t2 = setTimeout(() => arcadia.settings({ bgDim: v }), 300); }));
+  }
+  if (st.bgMode === 'solid') {
+    const r = el('div', 'field'); r.append(el('div', 'fl', 'Couleur du fond'));
+    const c = el('input', 'swatch'); c.type = 'color'; c.value = st.bgColor || '#0b0b0b'; c.onchange = () => set({ bgColor: c.value }); r.append(c); rows.push(r);
+  }
+  rows.push(fieldEl({ label: 'Couleur des boutons', type: 'select', options: [['image', 'Palette du fond (par défaut)'], ['custom', 'Personnalisée'], ['windows', 'Thème Windows']] }, st.accentMode, v => set({ accentMode: v })));
+  if (st.accentMode === 'custom') {
+    const r = el('div', 'field'); r.append(el('div', 'fl', 'Couleur personnalisée'));
+    const c = el('input', 'swatch'); c.type = 'color'; c.value = st.accentColor || '#ffffff'; c.onchange = () => set({ accentColor: c.value }); r.append(c); rows.push(r);
+  }
+  return group('Fond et couleurs', rows);
+}
+
+// Texte noir ou blanc selon la couleur du bouton
+function onAccent(hex) {
+  const [r, g, b] = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 > 0.55 ? '#0c0c0e' : '#ffffff';
+}
+// Galerie de fonds d'écran : recherche, filtres de taille et de format, défilement infini ou pages, aperçu en grand
+function wallGallery() {
+  const W = { q: '', res: [], types: [], page: 1, last: 1, mode: localStorage.getItem('wallMode') || 'infinite', busy: false };
+  openModal(card => {
+    card.classList.add('wall-modal'); card.style.position = 'relative';
+    const head = el('div', 'wall-head');
+    const sb = el('label', 'wall-search');
+    const q = el('input'); q.type = 'text'; q.placeholder = 'Rechercher un jeu, une œuvre, une ambiance…';
+    const go = el('button', '', 'Rechercher');
+    sb.append(el('span', '', '⌕'), q, go);
+    const x = el('button', 'wall-x', '×'); x.title = 'Fermer'; x.onclick = closeModal;
+    head.append(el('h2', '', 'Fonds d\'écran'), sb, x); card.append(head);
+    const f = el('div', 'wall-filters');
+    const grp = (label, opts, list) => {
+      const g = el('div', 'wall-group'); g.append(el('small', '', label));
+      for (const [v, l] of opts) { const c = el('button', 'wall-chip' + (W[list].includes(v) ? ' on' : ''), l); c.onclick = () => { W[list] = W[list].includes(v) ? W[list].filter(y => y !== v) : [...W[list], v]; c.classList.toggle('on'); search(true); }; g.append(c); }
+      return g;
+    };
+    f.append(grp('Taille', [['1280x720', 'HD'], ['1920x1080', 'Full HD'], ['2560x1440', '2K'], ['3840x2160', '4K']], 'res'), grp('Format', [['jpeg', 'JPG'], ['png', 'PNG'], ['gif', 'GIF'], ['webp', 'WEBP']], 'types'));
+    const mode = el('div', 'wall-mode');
+    for (const [v, l] of [['infinite', 'Défilement'], ['pages', 'Pages']]) { const b = el('button', W.mode === v ? 'on' : '', l); b.onclick = () => { W.mode = v; localStorage.setItem('wallMode', v); mode.querySelectorAll('button').forEach(z => z.classList.toggle('on', z === b)); search(true); }; mode.append(b); }
+    f.append(mode); card.append(f);
+    const grid = el('div', 'wall-grid'); card.append(grid);
+    const foot = el('div', 'wall-foot'), pager = el('div', 'wall-pager');
+    const local = el('button', 'btn-ghost', 'Utiliser une image de mon PC');
+    local.onclick = async () => { const r = await arcadia.wallLocal(); if (r.ok) { S = r.state; applyBackground(); toast('Fond installé'); closeModal(); } };
+    foot.append(local, pager); card.append(foot);
+    const sentinel = el('div', 'wall-sentinel', '');
+    const install = async (w, b) => { if (b) b.disabled = true; const r = await arcadia.wallInstall(w.full); if (b) b.disabled = false; if (r.ok) { S = r.state; applyBackground(); toast('Fond installé'); } else toast(r.error, true); };
+    const download = async w => { const r = await arcadia.wallDownload(w.full); if (r.ok) toast('Image enregistrée'); else if (r.error) toast(r.error, true); };
+    const view = w => { // aperçu en grand
+      const v = el('div', 'wall-view');
+      const img = el('div', 'wv-img'); img.style.backgroundImage = `url("${w.thumb}")`;
+      const full = new Image(); full.onload = () => { img.style.backgroundImage = `url("${w.full}")`; }; full.src = w.full;
+      const bar = el('div', 'wv-bar');
+      const back = el('button', 'btn-ghost', '← Retour'), dl = el('button', 'btn-ghost', 'Télécharger'), ins = el('button', 'btn-white', 'Installer comme fond');
+      back.onclick = () => v.remove(); dl.onclick = () => download(w); ins.onclick = () => install(w, ins);
+      bar.append(back, el('span', '', `${w.res.replace('x', ' × ')} · ${w.type.toUpperCase()}`), dl, ins);
+      v.append(img, bar); card.append(v);
+    };
+    const tile = w => {
+      const t = el('div', 'wall-item loading'); t.onclick = () => view(w);
+      // miniature d'abord, sinon l'image elle-même ; si rien ne s'affiche, la case disparaît (pas de trou dans la grille)
+      const srcs = [w.thumb, w.full].filter((x, i, a) => x && a.indexOf(x) === i);
+      const tryLoad = i => {
+        if (i >= srcs.length) { t.remove(); return; }
+        const im = new Image();
+        im.onload = () => { if (im.naturalWidth < 40) return tryLoad(i + 1); t.style.backgroundImage = `url("${srcs[i]}")`; t.classList.remove('loading'); };
+        im.onerror = () => tryLoad(i + 1);
+        im.referrerPolicy = 'no-referrer'; im.src = srcs[i];
+      };
+      tryLoad(0);
+      t.append(el('span', 'wi-info', `${w.res.replace('x', ' × ')} · ${w.type.toUpperCase()}`));
+      const a = el('div', 'wi-acts');
+      const dl = el('button', 'wi-btn', '⤓'); dl.title = 'Télécharger'; dl.onclick = e => { e.stopPropagation(); download(w); };
+      const ins = el('button', 'wi-btn main', '✓'); ins.title = 'Installer comme fond'; ins.onclick = e => { e.stopPropagation(); install(w, ins); };
+      a.append(dl, ins); t.append(a); return t;
+    };
+    async function search(reset) {
+      if (W.busy) return;
+      if (reset) { W.page = 1; grid.replaceChildren(); grid.scrollTop = 0; }
+      W.busy = true; sentinel.textContent = 'Chargement…'; grid.append(sentinel);
+      const r = await arcadia.wallSearch({ q: W.q, res: W.res, types: W.types, page: W.page });
+      W.busy = false; sentinel.remove();
+      if (!r.ok) { grid.append(el('div', 'wall-sentinel', r.error)); return; }
+      W.last = r.last;
+      if (W.mode === 'pages') { grid.replaceChildren(); grid.scrollTop = 0; }
+      const items = r.items.filter(w => !W.types.length || W.types.includes(w.type === 'jpg' ? 'jpeg' : w.type));
+      items.forEach(w => grid.append(tile(w)));
+      if (!grid.children.length) grid.append(el('div', 'wall-sentinel', 'Aucune image avec ces filtres.'));
+      pager.replaceChildren();
+      if (W.mode === 'pages') {
+        const prev = el('button', 'btn-ghost sm', '‹'), next = el('button', 'btn-ghost sm', '›');
+        prev.disabled = W.page <= 1; next.disabled = W.page >= W.last;
+        prev.onclick = () => { W.page--; search(false); }; next.onclick = () => { W.page++; search(false); };
+        pager.append(prev, el('span', 'muted small', `${W.page} / ${W.last}`), next);
+      }
+    }
+    grid.addEventListener('scroll', () => {
+      if (W.mode !== 'infinite' || W.busy || W.page >= W.last) return;
+      if (grid.scrollTop + grid.clientHeight > grid.scrollHeight - 500) { W.page++; search(false); }
+    });
+    go.onclick = e => { e.preventDefault(); W.q = q.value.trim(); search(true); };
+    q.onkeydown = e => { if (e.key === 'Enter') go.onclick(e); if (e.key === 'Escape' && card.querySelector('.wall-view')) { e.stopPropagation(); card.querySelector('.wall-view').remove(); } };
+    search(true); setTimeout(() => q.focus(), 50);
+  });
+}
+
 function applySettings() {
   const st = S.settings;
-  document.body.className = `glow-${st.glow}` + (st.iconSize ? '' : ' no-icons') + (st.showNames ? '' : ' no-names') + (st.showBadges ? '' : ' no-badges') + (st.accentByConsole ? ' accent' : '') + (BP.on ? ' bp-on' : '');
+  applyBackground();
+  document.body.className = `glow-${st.glow}` + (st.iconSize ? '' : ' no-icons') + (st.showNames ? '' : ' no-names') + (st.showBadges ? '' : ' no-badges') + (st.accentByConsole && st.bgMode !== 'custom' ? ' accent' : '') + (BP.on ? ' bp-on' : '');
   document.documentElement.style.setProperty('--icon', (st.iconSize || 22) + 'px');
   $('#view-seg').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === st.viewMode));
   $('#zoom').classList.toggle('hidden', st.viewMode === 'list');
@@ -394,18 +571,36 @@ async function play(id, o) {
     toast(r.ok ? `Sauvegarde restaurée (${r.count} fichier(s)).` : r.error, !r.ok);
   }
   const res = await arcadia.launch(id, o);
-  if (!res.ok && res.resumePick) { resumeModal(g, res.resumePick.items); return; }
+  if (!res.ok && res.resumePick) { resumeModal(g, res.resumePick.items, res.resumePick); return; }
   if (!res.ok && res.needSwitch) { switchKeysModal(g, res.needSwitch); return; }
+  if (!res.ok && res.needBios) { biosModal(g, res.needBios); return; }
+  if (!res.ok && res.needPs3Fw) { ps3FirmwareModal(g); return; }
+  if (!res.ok && res.needVitaFw) { vitaFirmwareModal(g); return; }
+  if (!res.ok && res.needXbox) { xboxModal(g, res.needXbox); return; }
   if (!res.ok) { toast(res.error, true); if (S.status[g.console]) openSettings(); }
   else toast(`Lancement de ${g.title}…`);
 }
 
 // Switch : clés / firmware manquants → l'utilisateur choisit SES fichiers, Arcadia les installe
+// Premier lancement (une fois par version) : jeux Switch présents mais clés / firmware absents
+async function switchStartupCheck() {
+  try {
+    if (localStorage.getItem('swNeedSeen') === S.appVersion) return;
+    const need = await arcadia.switchNeed();
+    if (!need) return;
+    localStorage.setItem('swNeedSeen', S.appVersion);
+    switchKeysModal(null, need);
+  } catch { /* stockage indisponible */ }
+}
 function switchKeysModal(g, need) {
   openModal(card => {
     card.classList.add('keys-modal');
-    card.append(el('h2', '', 'Il manque des fichiers système'));
-    card.append(el('p', '', `« ${g.title} » tourne sur un moteur Switch qui a besoin des clés (prod.keys) et du firmware d'une console. Ces fichiers appartiennent à Nintendo : Arcadia ne peut pas les fournir.`));
+    card.append(el('h2', '', g ? 'Il manque des fichiers système' : 'Jeux Switch : 2 fichiers à ajouter'));
+    card.append(el('p', '', `${g ? `« ${g.title} »` : 'Tes jeux Switch'} ont besoin de deux fichiers de ta propre console :`));
+    const why = el('ul', 'keys-why');
+    why.append(el('li', '', 'prod.keys : les clés qui permettent de lire les jeux (ils sont chiffrés).'), el('li', '', 'Firmware : le système de la Switch, dont les jeux se servent pour tourner.'));
+    card.append(why);
+    card.append(el('p', 'muted small', 'Ils appartiennent à Nintendo : Arcadia ne peut pas les fournir. Tu les installes une fois, ils servent à tous tes jeux Switch.'));
     const st = el('div', 'keys-status');
     const line = (ok, label) => { const d = el('div', ok ? 'ok' : 'ko'); d.append(el('span', '', ok ? '✓' : '✕'), el('span', '', label)); return d; };
     const paint = n => { st.replaceChildren(line(!n.keys, 'Clés (prod.keys)'), line(!n.firmware, 'Firmware')); };
@@ -424,7 +619,7 @@ function switchKeysModal(g, need) {
     acts.append(bk, bf); own.append(acts); card.append(own);
     const actions = el('div', 'modal-actions');
     const close = el('button', 'btn-ghost', 'Fermer'); close.onclick = closeModal;
-    const go = el('button', 'btn-ghost', 'Lancer le jeu'); go.onclick = () => { closeModal(); play(g.id); };
+    const go = el('button', 'btn-ghost', g ? 'Lancer le jeu' : 'C\'est fait'); go.onclick = () => { closeModal(); if (g) play(g.id); };
     const dc = el('button', 'btn-white', 'Me contacter sur Discord'); dc.onclick = () => arcadia.openUrl(DISCORD);
     const done = () => { go.classList.toggle('hidden', need.keys || need.firmware); };
     done();
@@ -559,7 +754,7 @@ function pickConsole(fileName) {
       card.append(el('h2', '', 'Quelle console ?'));
       card.append(el('p', '', `Je n'arrive pas à deviner la console de « ${fileName} ». Choisis-la :`));
       const hint = el('p', 'muted small'); hint.append(document.createTextNode('Ta console n\'est pas dans la liste ? Contacte-moi sur '));
-      const dl = el('a', 'oops-link', 'Discord'); dl.href = '#'; dl.onclick = e => { e.preventDefault(); arcadia.openUrl('https://discord.gg/PKw6MyzzzD'); };
+      const dl = el('a', 'oops-link', 'Discord'); dl.href = '#'; dl.onclick = e => { e.preventDefault(); arcadia.openUrl('https://discord.gg/7XczndQEsG'); };
       hint.append(dl, document.createTextNode(' pour que je l\'ajoute.')); card.append(hint);
       const grid = el('div', 'console-grid');
       for (const c of S.consoles) {
@@ -732,10 +927,8 @@ async function renderSettings(nav, content, foot) {
   navBtn(nav, 'library', 'Bibliothèque');
   navBtn(nav, 'shortcuts', 'Raccourcis clavier');
   navBtn(nav, 'saves', 'Sauvegardes & cloud');
+  navBtn(nav, 'engines', 'Moteurs');
   navBtn(nav, 'about', 'À propos');
-  nav.append(el('div', 'nav-title', 'Émulateurs'));
-  navBtn(nav, 'mapping', 'Attribution des consoles');
-  for (const e of SET.emus) navBtn(nav, 'emu:' + e.id, e.name, e.installed, e.consoles.join(' · '));
   foot.append(el('div', 'note', 'Certains paramètres ne sont pris en compte qu\'au prochain lancement du jeu.'));
   const sec = SET.section;
 
@@ -752,9 +945,10 @@ async function renderSettings(nav, content, foot) {
     a.append(warn);
     const ds = el('div', 'about-row');
     ds.append(el('span', '', 'Plus d\'informations ou une question ? Contacte-moi sur Discord :'));
-    const link = el('button', 'btn about-discord', 'discord.gg/PKw6MyzzzD'); link.onclick = () => arcadia.openUrl('https://discord.gg/PKw6MyzzzD');
+    const link = el('button', 'btn about-discord', 'discord.gg/7XczndQEsG'); link.onclick = () => arcadia.openUrl('https://discord.gg/7XczndQEsG');
     ds.append(link); a.append(ds);
     a.append(el('p', 'about-support', 'N\'hésitez pas à me soutenir pour plus de mises à jour : je vais travailler sur mon propre émulateur, un émulateur commun, pour continuer de vous fournir un outil propre, facile d\'accès et léger.'));
+    const tv = el('button', 'btn-ghost', 'Revoir la visite guidée'); tv.onclick = () => { closeModal(); runTour(0, () => {}); }; a.append(tv);
     a.append(el('div', 'about-ver muted small', `Version ${S.version || ''} · Licence GPL-3.0 · Moteurs : PPSSPP, melonDS, et les émulateurs libres de chaque console`));
     content.append(a);
     if (window.mountWordmarks) mountWordmarks();
@@ -766,11 +960,13 @@ async function renderSettings(nav, content, foot) {
     content.append(group('Comportement', [
       appField('Réduire Arcadia pendant une partie', 'minimizeOnPlay', 'bool', null, 'La fenêtre revient toute seule quand tu quittes le jeu.'),
       appField('Télécharger les jaquettes automatiquement', 'coversOnline', 'bool', null, 'Bases libres libretro-thumbnails et titledb (Switch). Seul le nom ou l\'identifiant du jeu sert à la recherche.'),
-      appField('Démarrer en BigPicture', 'bigPictureOnStart', 'bool', null, 'Plein écran, navigation à la manette.'),
+      appField('Démarrer en Mode Canapé', 'bigPictureOnStart', 'bool', null, 'Plein écran, navigation à la manette.'),
+      appField('Patchs 60 images/s automatiques', 'fps60Auto', 'bool', null, 'Switch, PSP et PS1 : vrais 60 images/s pour les jeux qui ont un patch connu, installés tout seuls (bases communautaires publiques). Désactivable jeu par jeu dans le menu Échap (Switch).'),
+      appField('Mode Canapé quand une manette s\'allume', 'couchAuto', 'bool', null, 'Arcadia passe tout seul en plein écran manette dès que tu allumes une manette.'),
       introField()
     ]));
     content.append(group('Pages de jeu', [appField('Clé SteamGridDB (facultative)', 'sgdbKey', 'text', null, 'Pour de grandes bannières façon Steam en haut de chaque jeu. Clé gratuite : crée un compte sur steamgriddb.com puis Préférences → API. Sans clé, Arcadia utilise une capture du jeu.')]));
-    content.append(group('Moteur intégré', [appField('Jouer avec le moteur Arcadia', 'useRunner', 'bool', null, 'Pour les consoles prises en charge (PSP, DS, 3DS, PS1, Game Boy, GBA, NES et Super Nintendo pour l\'instant), le jeu tourne directement dans Arcadia : aucune fenêtre d\'émulateur, menu Arcadia avec Échap ou le bouton Guide, reprise automatique de ta partie.')]));
+    content.append(await biosGroup());
     const padRow = el('div', 'tool');
     const ptd = el('div', 'td'); ptd.append(el('b', '', 'Ma manette'), el('div', '', padLabel(S.settings.input) + ' · ses touches sont appliquées à tous les jeux et à tous les moteurs.'));
     const pb = el('button', 'btn-white', 'Changer / calibrer'); pb.onclick = () => { closeModal(); inputModal(false); };
@@ -781,14 +977,23 @@ async function renderSettings(nav, content, foot) {
       appField('Quitter un jeu avec la manette', 'padQuit', 'bool', null, 'Maintiens Back (⧉) + Start (☰) pendant 1,5 s : l\'émulateur se ferme et tu reviens dans Arcadia. Marche même en plein écran.')]));
     content.append(group('Téléphone', [await remoteField()], 'Ton téléphone doit être sur le même Wi-Fi. Windows peut demander d\'autoriser Arcadia sur le réseau privé : accepte.'));
     const lg = el('div', 'tool');
-    const ltd = el('div', 'td'); ltd.append(el('b', '', 'Journal d\'erreurs'), el('div', '', 'Si quelque chose plante, envoie ce fichier : il contient la cause exacte.'));
+    const ltd = el('div', 'td'); ltd.append(el('b', '', 'Rapport de plantage'), el('div', '', 'Un jeu plante ou ne se lance pas ? « Créer un rapport » met tous les journaux dans un .zip sur ton Bureau : envoie-le sur Discord.'));
     const lb = el('button', 'btn-ghost', 'Ouvrir'); lb.onclick = () => arcadia.openLog();
-    lg.append(ltd, lb);
+    const rb = el('button', 'btn-white', 'Créer un rapport'); rb.title = 'Rassemble les journaux d\'Arcadia et des moteurs dans un .zip sur ton Bureau, à m\'envoyer sur Discord';
+    rb.onclick = () => makeReport();
+    const lw = el('div', 'numwrap'); lw.append(lb, rb);
+    lg.append(ltd, lw);
     content.append(group('Diagnostic', [lg]));
     content.append(group('Discord', [
       appField('Application ID Discord', 'discordId', 'text', null, 'Affiche « Joue à … » sur ton profil. Crée une application gratuite sur discord.com/developers/applications, nomme-la « Arcadia » et colle son Application ID ici. Discord doit être ouvert.')
     ]));
   } else if (sec === 'interface') {
+    content.append(await backgroundGroup());
+    content.append(group('Compteur d\'images/s', [
+      appField('Afficher les images/s en jeu', 'fpsHud', 'bool', null, 'Par-dessus le jeu, pour la Switch et le moteur Arcadia (PSP, DS, GBA, PS1, N64…). Les autres émulateurs ont leur propre compteur.'),
+      appField('Position', 'fpsHudPos', 'select', [['tl', 'En haut à gauche'], ['tr', 'En haut à droite'], ['bl', 'En bas à gauche'], ['br', 'En bas à droite']]),
+      appField('Taille', 'fpsHudSize', 'select', [['s', 'Petite'], ['m', 'Moyenne'], ['l', 'Grande']])
+    ], 'Change en direct, même pendant une partie. En orange : le jeu tourne sous sa vitesse normale.'));
     content.append(group('Apparence', [
       appField('Intensité de l\'effet lumineux', 'glow', 'select', [['off', 'Aucun'], ['soft', 'Doux'], ['medium', 'Moyen'], ['strong', 'Intense']]),
       appField('Lueur à la couleur de la console', 'accentByConsole', 'bool', null, 'Rouge pour la Switch, bleu pour la PlayStation…'),
@@ -856,13 +1061,24 @@ async function renderSettings(nav, content, foot) {
     content.append(g, reset);
   } else if (sec === 'saves') {
     await renderSavesSettings(content);
-  } else if (sec === 'mapping') {
-    renderMapping(content);
+  } else if (sec === 'engines' || sec === 'mapping') {
+    await renderEngines(content);
   } else if (sec.startsWith('emu:')) {
     await renderEmu(sec.slice(4), content, foot);
   }
 }
 
+// Une console, un moteur : simple état, rien à régler ; les moteurs de secours manquants s'installent d'un clic
+async function renderEngines(content) {
+  const list = await arcadia.enginesList().catch(() => []);
+  const rows = list.map(e => {
+    const r = el('div', 'eng-row' + (e.ready ? '' : ' off'));
+    r.append(el('span', 'eng-dot'), el('b', '', e.name), el('span', 'eng-name', e.engine || '—'), el('span', 'eng-state', e.ready ? 'Prêt' : e.need));
+    return r;
+  });
+  content.append(group('Moteurs', rows, 'Chaque console a son moteur, choisi par Arcadia. S\'il plante sur un jeu, Arcadia passe tout seul sur un moteur de secours.'));
+  if (typeof renderInstaller === 'function') await renderInstaller(content);
+}
 function renderMapping(content) {
   const head = el('div', 'tool');
   const td = el('div', 'td'); td.append(el('b', '', 'Détection automatique'), el('div', '', 'Choisis le dossier qui contient tes émulateurs : Arcadia trouve les exécutables tout seul.'));
@@ -909,9 +1125,9 @@ async function renderInstaller(content) {
     return;
   }
   const cat = await arcadia.emuCatalog();
-  if (!UPD.__loaded) { UPD.__loaded = true; arcadia.emuUpdates().then(u => { Object.assign(UPD, u); if (Object.values(u).some(x => x.update) && SET.section === 'mapping') SET.render(); }).catch(() => {}); }
+  if (!UPD.__loaded) { UPD.__loaded = true; arcadia.emuUpdates().then(u => { Object.assign(UPD, u); if (Object.values(u).some(x => x.update) && SET.section === 'engines') SET.render(); }).catch(() => {}); }
   const missing = cat.filter(c => !c.installed && c.auto);
-  const rows = cat.map(c => {
+  const rows = cat.filter(c => !c.installed || UPD[c.id]?.update).map(c => {
     const r = el('div', 'tool');
     const td = el('div', 'td');
     td.append(el('b', '', `${c.name}  ·  ${c.consoles.join(', ')}`), el('div', '', c.installed ? `✓ Installé${c.exe ? ' — ' + c.exe : ''}` : (c.note ? `Non installé · ${c.note}` : 'Non installé')));
@@ -937,7 +1153,8 @@ async function renderInstaller(content) {
     all.append(td, b);
     rows.unshift(all);
   }
-  box.append(group('Installation des émulateurs', rows, 'Téléchargés depuis les pages GitHub officielles de chaque projet.'));
+  if (!rows.length) rows.push(el('p', 'muted small', 'Tous les moteurs de secours sont installés et à jour.'));
+  box.append(group('Moteurs de secours', rows, 'Dernières versions officielles, téléchargées depuis la page GitHub de chaque projet.'));
 }
 
 async function installEmus(ids) {
@@ -1102,7 +1319,7 @@ function oopsModal(names) {
     card.append(el('h2', '', 'Oops !'));
     const p = el('p', '');
     p.append(document.createTextNode('Il semble que ton fichier ne soit pas reconnu parmi mes émulateurs… Contacte-moi sur '));
-    const a = el('a', 'oops-link', 'Discord'); a.href = '#'; a.onclick = e => { e.preventDefault(); arcadia.openUrl('https://discord.gg/PKw6MyzzzD'); };
+    const a = el('a', 'oops-link', 'Discord'); a.href = '#'; a.onclick = e => { e.preventDefault(); arcadia.openUrl('https://discord.gg/7XczndQEsG'); };
     p.append(a, document.createTextNode(' afin que je regarde pour potentiellement le mettre à jour !'));
     card.append(p);
     const list = el('div', 'oops-files mono');
@@ -1111,7 +1328,7 @@ function oopsModal(names) {
     card.append(list);
     const actions = el('div', 'modal-actions');
     const ok = el('button', 'btn-ghost', 'Fermer'); ok.onclick = closeModal;
-    const dc = el('button', 'btn-white', 'Ouvrir Discord'); dc.onclick = () => arcadia.openUrl('https://discord.gg/PKw6MyzzzD');
+    const dc = el('button', 'btn-white', 'Ouvrir Discord'); dc.onclick = () => arcadia.openUrl('https://discord.gg/7XczndQEsG');
     actions.append(ok, dc); card.append(actions);
   }, true);
 }
@@ -1172,7 +1389,7 @@ function orgModal(kind) {
     if (emus) {
       const re = el('button', 'btn-ghost', 'Réinstaller proprement');
       re.title = 'Installe les dernières versions officielles dans Arcadia\\Émulateurs (tes anciens émulateurs ne sont pas touchés)';
-      re.onclick = async () => { closeModal(); await openSettings('mapping'); resolve(); };
+      re.onclick = async () => { closeModal(); await openSettings('engines'); resolve(); };
       actions.append(keep, re, go);
     } else actions.append(keep, go);
     card.append(actions);
@@ -1259,7 +1476,7 @@ async function chooseLibrary() {
 async function afterFirstLibrary() {
   const cat = await arcadia.emuCatalog();
   if (cat.some(c => c.installed)) return;
-  if (await confirmBox('Aucun émulateur trouvé', 'Installer maintenant les émulateurs recommandés (dernières versions officielles) ? Tu pourras aussi indiquer un dossier où tu en as déjà.')) openSettings('mapping');
+  if (await confirmBox('Aucun émulateur trouvé', 'Installer maintenant les émulateurs recommandés (dernières versions officielles) ? Tu pourras aussi indiquer un dossier où tu en as déjà.')) openSettings('engines');
 }
 $('#btn-create-lib').onclick = async () => { S = await arcadia.createLibrary(); renderAll(); toast(`Bibliothèque créée : ${S.libraryDir}`); afterFirstLibrary(); };
 $('#btn-choose-first').onclick = chooseLibrary;
@@ -1307,7 +1524,8 @@ arcadia.onExited(({ id, seconds, stats, backup }) => {
 });
 arcadia.onStateUpdate(st => { S = st; renderAll(); if (BP.on) bpRender(); });
 arcadia.onResume(({ id, items }) => { const g = gameById(id); if (g) resumeModal(g, items); });
-arcadia.onError(({ id, error }) => { running.delete(id); toast(`Impossible de lancer : ${error}`, true); renderAll(); });
+arcadia.onFallback(({ title }) => toast(`${title} : le moteur Arcadia a eu un souci, relance avec le moteur de secours…`, false, { label: 'Créer un rapport', fn: makeReport }));
+arcadia.onError(({ id, error }) => { running.delete(id); toast(`Impossible de lancer : ${error}`, true, { label: 'Créer un rapport', fn: makeReport }); renderAll(); });
 
 // ------------------------------------------------------------ démarrage
 (async () => {
@@ -1325,10 +1543,106 @@ arcadia.onError(({ id, error }) => { running.delete(id); toast(`Impossible de la
   await checkOrg();
   const up = await arcadia.checkUpdate().catch(() => null);
   if (up && await confirmBox(`Arcadia ${up.version} est disponible`, `Installer la nouvelle version maintenant ? Arcadia se ferme, se met à jour et se relance tout seul. Tes jeux, émulateurs, réglages et sauvegardes ne sont pas touchés.`)) {
-    await arcadia.installUpdate(up.file); return;
+    await updateScreen(up.version); await arcadia.installUpdate(up.file); return;
   }
+  await switchStartupCheck();
+  try { if (!localStorage.getItem('arcadiaTour1')) await firstRun(); } catch { /* stockage indisponible */ }
   if (S.settings.bigPictureOnStart) bpOpen();
 })();
+// Écran de mise à jour : l'interface se dissout en pixels, puis Arcadia redémarre
+function updateScreen(version) {
+  return new Promise(resolve => {
+    const wrap = el('div', 'upd-screen');
+    const cv = document.createElement('canvas'); cv.width = innerWidth; cv.height = innerHeight;
+    const txt = el('div', 'upd-txt'); txt.append(el('b', '', 'Mise à jour'), el('span', '', `Arcadia ${version} · redémarrage…`));
+    const bar = el('div', 'upd-bar'); const fill = el('div', ''); bar.append(fill); txt.append(bar);
+    wrap.append(cv, txt); document.body.append(wrap);
+    const ctx = cv.getContext('2d'), px = 22, cols = Math.ceil(cv.width / px), rows = Math.ceil(cv.height / px);
+    const cells = []; for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) cells.push([x, y, Math.random() * .6 + (y / rows) * .4]);
+    cells.sort((a, b) => a[2] - b[2]);
+    const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#39e5c8';
+    const t0 = performance.now(), dur = 1500;
+    const step = now => {
+      const k = Math.min(1, (now - t0) / dur), n = Math.floor(cells.length * k);
+      for (let i = step.done || 0; i < n; i++) {
+        const [x, y] = cells[i];
+        ctx.fillStyle = Math.random() < .035 ? accent : '#07080b';
+        ctx.fillRect(x * px, y * px, px, px);
+      }
+      step.done = n; fill.style.width = Math.round(k * 100) + '%';
+      if (k < 1) requestAnimationFrame(step); else { txt.classList.add('on'); setTimeout(resolve, 500); }
+    };
+    requestAnimationFrame(step);
+    setTimeout(() => txt.classList.add('show'), 200);
+  });
+}
+// ------------------------------------------------------------ premier lancement : avertissement + visite guidée
+const TOUR = [
+  { sel: '#btn-add', title: 'Ajoute tes jeux', text: 'Clique ici, ou glisse tes fichiers de jeux n\'importe où dans la fenêtre. Arcadia reconnaît la console, range le jeu et trouve sa jaquette tout seul.' },
+  { sel: '.sidebar', title: 'Ta bibliothèque', text: 'Tous tes jeux, tes favoris et tes catégories. La recherche et le filtre par console sont juste en haut.' },
+  { sel: '#grid', title: 'Un clic pour jouer', text: 'Clique sur une jaquette pour ouvrir le jeu, puis sur Jouer. Arcadia choisit le bon moteur, la langue du jeu et les patchs 60 images/s quand il y en a.' },
+  { sel: null, title: 'En jeu : Échap', text: 'Pendant une partie, Échap (ou le bouton Guide de la manette) ouvre le menu Arcadia : reprendre, sauvegardes, vidéo, son, contrôles, quitter.' },
+  { sel: '#btn-emus', title: 'Personnalise tout', text: 'Fond d\'écran, couleurs, compteur d\'images/s, manette, sauvegardes dans le cloud… Tout est dans les Paramètres.' },
+  { sel: '#btn-bp', title: 'Mode Canapé', text: 'Plein écran pensé pour la manette. Il s\'ouvre aussi tout seul quand tu allumes une manette.' }
+];
+function firstRun() {
+  return new Promise(resolve => {
+    const done = () => { try { localStorage.setItem('arcadiaTour1', '1'); } catch { /* */ } resolve(); };
+    openModal(c => {
+      c.classList.add('fr-modal');
+      c.append(el('div', 'fr-tag', '// bienvenue'), el('h2', '', 'Bienvenue sur Arcadia'));
+      c.append(el('p', '', 'Toute ta collection de jeux, une seule application : Arcadia trouve le bon moteur, les jaquettes, les langues et s\'occupe du reste.'));
+      const warn = el('div', 'fr-warn');
+      warn.append(el('b', '', 'Logiciel en cours de développement'), el('span', '', 'Arcadia est encore en développement. En cas de souci majeur, contacte-nous sur Discord : on répond vite.'));
+      const dc = el('button', 'btn-ghost', 'Rejoindre le Discord'); dc.onclick = () => arcadia.openUrl(DISCORD);
+      warn.append(dc); c.append(warn);
+      const a = el('div', 'modal-actions');
+      const skip = el('button', 'btn-ghost', 'Passer'); skip.onclick = () => { closeModal(); done(); };
+      const go = el('button', 'btn-white', 'Visite guidée'); go.onclick = () => { closeModal(); runTour(0, done); };
+      a.append(skip, go); c.append(a);
+      setTimeout(() => go.focus(), 50);
+    }, true);
+  });
+}
+function runTour(i, done) {
+  document.querySelector('.tour')?.remove();
+  const steps = TOUR.filter(t => !t.sel || (document.querySelector(t.sel) && document.querySelector(t.sel).getClientRects().length));
+  if (i >= steps.length) { done(); return; }
+  const t = steps[i], wrap = el('div', 'tour');
+  const hole = el('div', 'tour-hole'), card = el('div', 'tour-card');
+  const target = t.sel && document.querySelector(t.sel);
+  if (target) {
+    const r = target.getBoundingClientRect(), m = 8;
+    Object.assign(hole.style, { left: r.left - m + 'px', top: r.top - m + 'px', width: r.width + 2 * m + 'px', height: Math.min(r.height + 2 * m, innerHeight - r.top) + 'px' });
+    const below = r.bottom + 230 < innerHeight;
+    card.style.left = Math.max(16, Math.min(innerWidth - 400, r.left)) + 'px';
+    card.style.top = (below ? Math.min(r.bottom + 18, innerHeight - 230) : Math.max(16, r.top - 230)) + 'px';
+  } else { hole.classList.add('none'); card.classList.add('center'); }
+  card.append(el('div', 'tour-step', `${i + 1} / ${steps.length}`), el('b', '', t.title), el('p', '', t.text));
+  const nav = el('div', 'tour-nav');
+  const skip = el('button', 'btn-ghost sm', 'Terminer'); skip.onclick = () => { wrap.remove(); done(); };
+  const prev = el('button', 'btn-ghost sm', 'Précédent'); prev.disabled = i === 0; prev.onclick = () => runTour(i - 1, done);
+  const next = el('button', 'btn-white sm', i === steps.length - 1 ? 'C\'est parti' : 'Suivant'); next.onclick = () => runTour(i + 1, done);
+  nav.append(skip, el('span', 'spacer'), prev, next); card.append(nav);
+  wrap.append(hole, card); document.body.append(wrap);
+  wrap.onkeydown = e => { if (e.key === 'Escape') skip.click(); if (e.key === 'ArrowRight' || e.key === 'Enter') next.click(); if (e.key === 'ArrowLeft' && !prev.disabled) prev.click(); };
+  setTimeout(() => next.focus(), 30);
+}
+async function makeReport() {
+  const r = await arcadia.makeReport().catch(e => ({ ok: false, error: e.message }));
+  if (r.ok) toast(`Rapport créé sur ton Bureau (${r.count} journaux)`); else toast(`Rapport impossible : ${r.error}`, true);
+}
+// Nouvelle version déposée pendant qu'Arcadia est ouvert : petite bannière, un clic pour relancer
+arcadia.onUpdate(u => {
+  document.querySelector('.upd-pill')?.remove();
+  const b = el('div', 'upd-pill');
+  const go = el('button', 'upd-go', 'Mettre à jour');
+  const x = el('button', 'upd-x', '✕'); x.title = 'Plus tard';
+  b.append(el('span', 'upd-dot'), el('span', '', `Une mise à jour est disponible · ${u.version}`), go, x);
+  go.onclick = async () => { go.disabled = true; b.remove(); await updateScreen(u.version); const r = await arcadia.installUpdate(u.file); if (r && !r.ok) { document.querySelector('.upd-screen')?.remove(); toast(r.error, true); } };
+  x.onclick = () => b.remove();
+  document.body.append(b);
+});
 
 // ============================================================ 1.3 : fiche riche, sauvegardes, réglages par jeu
 const DETAILS = {};
@@ -1373,6 +1687,7 @@ async function renderDetails(g) {
     }
     const hero = $('#hero-bg');
     if (d && d.banner) { hero.style.backgroundImage = `url("${mediaUrl(d.banner)}")`; hero.classList.toggle('is-hero', d.bannerKind === 'hero'); hero.classList.toggle('is-shot', d.bannerKind !== 'hero'); }
+    hero.parentElement?.classList.toggle('is-big', !!(d && d.banner && d.bannerKind === 'hero'));
   };
   if (DETAILS[g.id]) { show(DETAILS[g.id]); return; }
   show(null);
@@ -1382,12 +1697,13 @@ async function renderDetails(g) {
 }
 
 // ------------------------------------------------------------ multijoueur
-const DISCORD = 'https://discord.gg/PKw6MyzzzD';
+const DISCORD = 'https://discord.gg/7XczndQEsG';
 function discordLink(text) { const a = el('a', 'oops-link', text || 'Discord'); a.href = '#'; a.onclick = e => { e.preventDefault(); arcadia.openUrl(DISCORD); }; return a; }
 const MULTI_ICON = { couch: '🎮', adhoc: '📡', wireless: '📶', ldn: '🌐', dswifi: '📶', dead: '⛔' };
 async function renderMulti(g) {
   const box = $('#g-multi');
   box.classList.add('hidden');
+  if (true) return; // multijoueur Arcadia : mis de côté pour l'instant (on y reviendra)
   const m = await arcadia.gameMulti(g.id).catch(() => null);
   if (selectedId !== g.id || !m || m.solo) return;
   box.replaceChildren(el('h3', '', 'MULTIJOUEUR'));
@@ -1509,23 +1825,12 @@ async function renderSavesPanel(g) {
 
 async function renderGameSettings(g) {
   const box = $('#g-gset');
-  const emus = await arcadia.gameEmulators(g.id).catch(() => []);
   if (selectedId !== g.id) return;
   const gs = (S.gameSettings || {})[g.id] || {};
   box.replaceChildren();
-  const sel = el('select');
-  const runnerDefault = (S.runnerConsoles || []).includes(g.console) && S.settings.useRunner !== false;
-  sel.append(Object.assign(el('option', '', 'Par défaut (' + (runnerDefault ? 'Arcadia, moteur intégré' : (S.emulators[S.mapping[g.console]?.emulator]?.name || 'aucun')) + ')'), { value: '' }));
-  for (const e of emus) sel.append(Object.assign(el('option', '', e.name), { value: e.id }));
-  sel.value = gs.emulator || '';
-  sel.onchange = async () => { S = await arcadia.gameSettings(g.id, { emulator: sel.value || null }); renderAll(); };
-  const args = el('input'); args.placeholder = 'Arguments en plus (facultatif)'; args.value = gs.extraArgs || '';
-  args.onchange = async () => { S = await arcadia.gameSettings(g.id, { extraArgs: args.value.trim() || null }); };
-  const l1 = el('label', 'gset'); l1.append(el('span', 'muted small', 'Émulateur'), sel);
-  const l2 = el('label', 'gset'); l2.append(el('span', 'muted small', 'Arguments'), args);
   const sc = el('button', 'btn-ghost sm', '🖥 Raccourci sur le Bureau');
   sc.onclick = () => desktopShortcut(g);
-  box.append(l1, langField(g, gs), l2, sc);
+  box.append(langField(g, gs), sc);
 }
 
 async function desktopShortcut(g) {
@@ -1584,18 +1889,7 @@ function sfx(kind) {
 }
 document.addEventListener('click', e => { if (e.target.closest('.card, .recent, .lrow, .row')) sfx('open'); }, true);
 
-// Fond d'ambiance : la jaquette survolée teinte légèrement l'arrière-plan
-let ambT = null;
-document.addEventListener('mouseover', e => {
-  const c = e.target.closest('.card');
-  if (!c || view !== 'home') return;
-  clearTimeout(ambT);
-  ambT = setTimeout(() => {
-    const g = gameById(c.dataset.id);
-    const src = g && (g.cover || g.icon);
-    $('#main').style.setProperty('--amb', src ? `url("${mediaUrl(src)}")` : 'none');
-  }, 120);
-});
+// (fond d'ambiance selon la jaquette survolée : retiré, le fond reste celui choisi dans Personnaliser ou celui par défaut)
 
 // ============================================================ navigation spatiale (flèches + manette)
 function navTargets() {
@@ -1655,7 +1949,11 @@ function padLoop() {
   }
   requestAnimationFrame(padLoop);
 }
-window.addEventListener('gamepadconnected', () => toast('🎮 Manette connectée : croix pour naviguer, A pour valider, Start pour BigPicture.'));
+// Mode Canapé : une manette s'allume → plein écran pensé pour la manette (si activé, et hors partie)
+window.addEventListener('gamepadconnected', () => {
+  if (S.settings.couchAuto !== false && !BP.on && !running.size) { bpOpen(); toast('Mode Canapé · B ou Échap pour revenir'); }
+  else if (!BP.on) toast('Manette connectée : croix pour naviguer, A pour valider, Start pour le Mode Canapé.');
+});
 requestAnimationFrame(padLoop);
 
 // ============================================================ BigPicture (carrousel façon Steam)
@@ -1838,11 +2136,13 @@ function renderHealth() {
 
 function renderUpdates(g) {
   const box = $('#g-updates');
-  const ups = g.titleId ? S.games.filter(p => p.patch && p.titleId === g.titleId) : [];
+  // même identifiant (Switch), sinon même console + même nom une fois « (DLC) », « (Update) »… retirés
+  const base = t => normTitle(String(t || '').replace(/[\[(][^\])]*[\])]/g, ' '));
+  const ups = S.games.filter(p => p.patch && p.id !== g.id && (g.titleId ? p.titleId === g.titleId : p.console === g.console && base(p.title) === base(g.title)));
   box.classList.toggle('hidden', !ups.length);
   if (!ups.length) return;
   box.replaceChildren(el('h3', '', 'MISES À JOUR / DLC TROUVÉES'));
-  box.append(el('div', 'muted small', 'Pour les appliquer : dans Eden, menu Fichier → « Installer des fichiers dans la NAND », puis choisis ce fichier. Arcadia le garde de côté pour qu\'il n\'encombre pas la bibliothèque.'));
+  box.append(el('div', 'muted small', g.console === '3DS' ? 'Pour l\'appliquer : dans Azahar, menu Fichier → « Installer un CIA », puis choisis ce fichier. Arcadia le garde de côté pour qu\'il ne compte pas comme un jeu en double.' : 'Pour les appliquer : dans Eden, menu Fichier → « Installer des fichiers dans la NAND », puis choisis ce fichier. Arcadia le garde de côté pour qu\'il n\'encombre pas la bibliothèque.'));
   for (const u of ups) { const r = el('div', 'upd-row'); const b = el('button', 'btn-ghost sm', 'Afficher le fichier'); b.onclick = () => arcadia.showInFolder(u.id); r.append(el('span', '', u.file), b); box.append(r); }
 }
 
@@ -2044,23 +2344,40 @@ function inputModal(first) {
 
 // « Reprendre ta partie ? » pour les jeux sur émulateur externe : sauvegarde actuelle du jeu, ou une copie
 const fmtCopy = iso => new Date(iso).toLocaleString('fr-FR', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
-function resumeModal(g, items) {
+const ago = iso => {
+  const m = Math.round((Date.now() - new Date(iso)) / 60000);
+  if (m < 1) return 'à l\'instant'; if (m < 60) return `il y a ${m} min`;
+  const h = Math.round(m / 60); if (h < 24) return `il y a ${h} h`;
+  const d = Math.round(h / 24); return d === 1 ? 'hier' : d < 30 ? `il y a ${d} jours` : fmtCopy(iso);
+};
+function resumeModal(g, items, pick = {}) {
+  // image de secours : la bannière ou la jaquette du jeu, floutée
+  const art = (DETAILS[g.id] && DETAILS[g.id].banner && mediaUrl(DETAILS[g.id].banner)) || (g.cover && mediaUrl(g.cover)) || '';
+  const shot = (box, src) => {
+    if (src) box.style.backgroundImage = `url("${src}")`;
+    else { box.classList.add('rs-none'); if (art) box.style.setProperty('--art', `url("${art}")`); }
+  };
   openModal(card => {
     card.classList.add('resume-modal');
-    card.append(el('h2', '', 'Reprendre ta partie ?'));
-    card.append(el('p', '', 'Continue là où le jeu s\'est arrêté, ou repars d\'une de tes copies de sauvegarde.'));
-    const go = el('button', 'rs-main');
-    const gt = el('div', 'rs-txt'); gt.append(el('b', '', '▶  Continuer'), el('span', '', 'Dernière sauvegarde du jeu'));
-    if (items[0] && items[0].thumb) go.style.setProperty('--img', `url("${items[0].thumb}")`);
-    go.append(gt);
+    const head = el('div', 'rs-head');
+    const ht = el('div', ''); ht.append(el('h2', '', g.title), el('p', 'muted small', 'Reprends là où tu t\'es arrêté, ou repars d\'une copie.'));
+    const x = el('button', 'rs-x', '✕'); x.title = 'Annuler'; x.onclick = closeModal;
+    head.append(ht, x); card.append(head);
+
+    const go = el('button', 'rs-go');
+    const gi = el('div', 'rs-go-img'); shot(gi, pick.last || (items[0] && items[0].thumb));
+    const gt = el('div', 'rs-go-txt'); gt.append(el('b', '', 'Continuer'), el('span', '', pick.lastAt ? `Dernière partie ${ago(pick.lastAt)}` : 'Dernière sauvegarde du jeu'));
+    go.append(gi, gt, el('span', 'rs-go-play', '▶'));
     go.onclick = () => { closeModal(); play(g.id, { skipResume: true }); };
     card.append(go);
-    card.append(el('div', 'rs-label', 'Ou repartir d\'une copie'));
+
+    card.append(el('div', 'rs-label', `Copies de sauvegarde · ${items.length}`));
     const grid = el('div', 'rs-grid');
     for (const it of items) {
       const b = el('button', 'rs-item');
-      const im = el('div', 'rs-img'); if (it.thumb) im.style.backgroundImage = `url("${it.thumb}")`; else im.append(el('span', '', '◆'));
-      b.append(im, el('b', '', fmtCopy(it.iso)), el('span', '', it.machine || ''));
+      const im = el('div', 'rs-img'); shot(im, it.thumb);
+      const meta = el('div', 'rs-meta'); meta.append(el('b', '', fmtCopy(it.iso)), el('span', '', [ago(it.iso), it.machine].filter(Boolean).join(' · ')));
+      b.append(im, meta);
       b.onclick = async () => {
         if (!await confirmBox('Repartir de cette copie ?', `La sauvegarde du ${fmtCopy(it.iso)} remplace celle du jeu. L'état actuel est copié avant, par sécurité.`)) return;
         const r = await arcadia.savesRestore(g.id, it.file);
@@ -2070,22 +2387,25 @@ function resumeModal(g, items) {
       grid.append(b);
     }
     card.append(grid);
-    const acts = el('div', 'modal-actions');
-    const no = el('button', 'btn-ghost', 'Annuler'); no.onclick = closeModal;
-    acts.append(no); card.append(acts);
     setTimeout(() => go.focus(), 50);
   }, true);
 }
 
 // Langue du jeu : seulement les langues proposées par la ROM (ou par la console quand la ROM ne les liste pas)
 const LANG_NAMES = { fr: 'Français', 'fr-CA': 'Français (Canada)', en: 'Anglais', 'en-GB': 'Anglais (Royaume-Uni)', de: 'Allemand', it: 'Italien', es: 'Espagnol', 'es-419': 'Espagnol (Amérique latine)', nl: 'Néerlandais', pt: 'Portugais', 'pt-BR': 'Portugais (Brésil)', ru: 'Russe', ja: 'Japonais', ko: 'Coréen', 'zh-Hans': 'Chinois simplifié', 'zh-Hant': 'Chinois traditionnel' };
+const REGION_NAMES = { EUR: 'européenne', USA: 'américaine', JPN: 'japonaise', KOR: 'coréenne', FRA: 'française', DEU: 'allemande', ESP: 'espagnole', ITA: 'italienne', NLD: 'néerlandaise', AUS: 'australienne', CHN: 'chinoise', TWN: 'taïwanaise', INT: 'internationale' };
+// Langue du jeu : liste lue dans la ROM (Switch, 3DS), déduite de sa région (DS, PSP, GameCube, Wii, Dreamcast…)
+// ou, pour les consoles où la langue est gravée dans la ROM (PS1, PS2, N64, GBA…), simple information.
 function langField(g, gs) {
   const l = el('label', 'gset');
   l.append(el('span', 'muted small', 'Langue du jeu'));
+  const version = g.region ? `Version ${REGION_NAMES[g.region] || g.region}` : '';
   const langs = g.langs || [];
-  if (!langs.length) {
-    const fixed = ['PS1', 'NES', 'SNES', 'GB', 'GBC', 'GBA', 'N64', 'MEGADRIVE'].includes(g.console);
-    l.append(el('span', 'small', fixed ? 'Fixée par la version du jeu (une seule langue dans la ROM)' : 'Se règle dans le jeu ou dans l\'émulateur'));
+  if (!g.langSettable || !langs.length) {
+    const many = g.region === 'EUR' || g.region === 'INT';
+    l.append(el('span', 'small', version
+      ? `${version}${many ? ' : plusieurs langues, le choix se fait dans le jeu' : ' : langue fixée par cette version'}`
+      : ['PS1', 'NES', 'SNES', 'GB', 'GBC', 'GBA', 'N64', 'MEGADRIVE'].includes(g.console) ? 'Fixée par la version du jeu' : 'Se règle dans le jeu ou dans l\'émulateur'));
     return l;
   }
   const sel = el('select');
@@ -2094,6 +2414,128 @@ function langField(g, gs) {
   sel.value = gs.lang && langs.includes(gs.lang) ? gs.lang : '';
   sel.onchange = async () => { S = await arcadia.gameSettings(g.id, { lang: sel.value || null }); toast(`Langue : ${sel.value ? LANG_NAMES[sel.value] : 'automatique'} (au prochain lancement)`); };
   l.append(sel);
-  l.title = g.langsFromRom ? `Langues présentes dans la ROM : ${langs.map(c => LANG_NAMES[c] || c).join(', ')}` : 'Langue de la console émulée : le jeu l\'utilise s\'il la propose.';
+  const names = langs.map(c => LANG_NAMES[c] || c).join(', ');
+  l.title = g.langsFrom === 'rom' ? `Langues présentes dans la ROM : ${names}`
+    : g.langsFrom === 'region' ? `${version} : langues habituelles de cette version (${names})`
+    : 'Langue de la console émulée : le jeu l\'utilise s\'il la propose.';
+  if (version) l.append(el('span', 'muted small', version + (g.langsFrom === 'rom' ? ' · langues lues dans la ROM' : '')));
   return l;
+}
+
+// BIOS manquant (PS2…) : Arcadia ne peut pas le fournir ; l'utilisateur installe celui de SA console
+function biosModal(g, need) {
+  openModal(card => {
+    card.classList.add('keys-modal');
+    card.append(el('h2', '', 'Il manque le BIOS de la console'));
+    card.append(el('p', '', `« ${g.title} » a besoin du ${need.label}. Ce fichier appartient au fabricant de la console : Arcadia ne peut pas le fournir. Il s'extrait de ta propre console.`));
+    const p = el('p', ''); p.append(document.createTextNode('Pour savoir comment faire, contacte-moi sur '), discordLink(), document.createTextNode(' : je t\'explique.')); card.append(p);
+    const own = el('details', 'keys-own'); own.append(el('summary', '', 'J\'ai déjà mon BIOS'));
+    const b = el('button', 'btn-ghost', 'Choisir mon BIOS…');
+    b.onclick = async () => { const r = await arcadia.biosInstall(need.console); if (r.ok) { S = r.state; toast(r.message); closeModal(); play(g.id); } else if (r.error) toast(r.error, true); };
+    const acts0 = el('div', 'keys-acts'); acts0.append(b); own.append(acts0); card.append(own);
+    const acts = el('div', 'modal-actions');
+    const close = el('button', 'btn-ghost', 'Fermer'); close.onclick = closeModal;
+    const dc = el('button', 'btn-white', 'Me contacter sur Discord'); dc.onclick = () => arcadia.openUrl(DISCORD);
+    acts.append(close, dc); card.append(acts);
+  });
+}
+// PS3 : firmware officiel de Sony (gratuit), téléchargé et installé par Arcadia
+function ps3FirmwareModal(g) {
+  openModal(card => {
+    card.classList.add('keys-modal');
+    card.append(el('h2', '', 'Firmware PS3 à installer'));
+    card.append(el('p', '', 'Pour lancer un jeu PS3, le moteur a besoin du logiciel système de la console. Sony le distribue gratuitement : Arcadia peut le télécharger depuis le site officiel et l\'installer pour toi (environ 200 Mo).'));
+    const bar = el('div', 'fw-bar hidden'); const fill = el('div'); bar.append(fill); card.append(bar);
+    const st = el('p', 'small muted', ''); card.append(st);
+    const acts = el('div', 'modal-actions');
+    const pick = el('button', 'btn-ghost', 'J\'ai déjà PS3UPDAT.PUP…');
+    const go = el('button', 'btn-white', 'Télécharger et installer');
+    const run = async mode => {
+      go.disabled = pick.disabled = true; bar.classList.toggle('hidden', mode === 'pick');
+      st.textContent = mode === 'pick' ? 'Installation…' : 'Téléchargement depuis Sony…';
+      const r = await arcadia.ps3Firmware(mode);
+      go.disabled = pick.disabled = false;
+      if (r.ok) { closeModal(); toast('Firmware PS3 installé'); if (g) play(g.id); return; }
+      if (r.cancelled) { st.textContent = ''; return; }
+      st.textContent = r.error || 'Échec';
+      if (r.manual) { const o = el('button', 'btn-ghost', 'Ouvrir la page de Sony'); o.onclick = () => arcadia.openUrl('https://www.playstation.com/fr-fr/support/hardware/ps3/system-software/'); acts.prepend(o); }
+    };
+    arcadia.onPs3Progress(p => { if (!p.total) return; fill.style.width = Math.round(100 * p.got / p.total) + '%'; st.textContent = `Téléchargement : ${Math.round(p.got / 1048576)} / ${Math.round(p.total / 1048576)} Mo`; if (p.got >= p.total) st.textContent = 'Installation dans le moteur PS3…'; });
+    go.onclick = () => run('download'); pick.onclick = () => run('pick');
+    const close = el('button', 'btn-ghost', 'Plus tard'); close.onclick = closeModal;
+    acts.append(close, pick, go); card.append(acts);
+  });
+}
+// PS Vita : firmware + polices officiels, téléchargés chez Sony et installés par Vita3K
+function vitaFirmwareModal(g) {
+  openModal(card => {
+    card.classList.add('keys-modal');
+    card.append(el('h2', '', 'Firmware PS Vita à installer'));
+    card.append(el('p', '', 'Pour lancer un jeu PS Vita, le moteur a besoin du logiciel système de la console et de ses polices d\'écriture. Sony les distribue gratuitement : Arcadia les télécharge sur les serveurs officiels et les installe pour toi (environ 150 Mo).'));
+    const bar = el('div', 'fw-bar hidden'); const fill = el('div'); bar.append(fill); card.append(bar);
+    const st = el('p', 'small muted', ''); card.append(st);
+    const acts = el('div', 'modal-actions');
+    const pick = el('button', 'btn-ghost', 'J\'ai déjà les fichiers .PUP…');
+    const go = el('button', 'btn-white', 'Télécharger et installer');
+    const run = async mode => {
+      go.disabled = pick.disabled = true; bar.classList.toggle('hidden', mode === 'pick');
+      st.textContent = mode === 'pick' ? 'Installation…' : 'Téléchargement depuis Sony…';
+      const r = await arcadia.vitaFirmware(mode);
+      go.disabled = pick.disabled = false;
+      if (r.ok) { closeModal(); toast('Firmware PS Vita installé'); if (g) play(g.id); return; }
+      if (r.cancelled) { st.textContent = ''; return; }
+      st.textContent = r.error || 'Échec';
+      if (r.manual) { const o = el('button', 'btn-ghost', 'Ouvrir la page de Sony'); o.onclick = () => arcadia.openUrl('https://www.playstation.com/fr-fr/support/hardware/psvita/system-software/'); acts.prepend(o); }
+    };
+    arcadia.onVitaProgress(p => { if (!p.total) return; fill.style.width = Math.round(100 * p.got / p.total) + '%'; st.textContent = `Téléchargement : ${Math.round(p.got / 1048576)} / ${Math.round(p.total / 1048576)} Mo`; });
+    go.onclick = () => run('download'); pick.onclick = () => run('pick');
+    const close = el('button', 'btn-ghost', 'Plus tard'); close.onclick = closeModal;
+    acts.append(close, pick, go); card.append(acts);
+  });
+}
+// Xbox : BIOS + MCPX (de la console du joueur) + disque dur vierge (fourni gratuitement par xemu)
+function xboxModal(g, need) {
+  openModal(card => {
+    card.classList.add('keys-modal');
+    card.append(el('h2', '', 'Xbox : 3 fichiers système'));
+    card.append(el('p', '', 'Le moteur Xbox a besoin de :'));
+    const why = el('ul', 'keys-why');
+    why.append(el('li', '', 'MCPX : la petite puce de démarrage de la console (512 octets).'), el('li', '', 'BIOS : le système de la Xbox.'), el('li', '', 'Disque dur : un disque vierge, fourni gratuitement par xemu. Arcadia le télécharge pour toi.'));
+    card.append(why);
+    card.append(el('p', 'muted small', 'Le MCPX et le BIOS appartiennent à Microsoft : Arcadia ne peut pas les fournir, ils s\'extraient de ta propre console.'));
+    const st = el('div', 'keys-status'); card.append(st);
+    const bar = el('div', 'fw-bar hidden'); const fill = el('div'); bar.append(fill); card.append(bar);
+    const line = (ok, label, what, btnLabel) => {
+      const d = el('div', ok ? 'ok' : 'ko'); d.append(el('span', '', ok ? '✓' : '✕'), el('span', '', label));
+      if (!ok) { const b = el('button', 'btn-ghost sm', btnLabel); b.style.marginLeft = 'auto'; b.onclick = async () => { b.disabled = true; if (what === 'hdd') bar.classList.remove('hidden'); const r = await arcadia.xboxInstall(what); b.disabled = false; bar.classList.add('hidden'); if (r.ok) { need = r.need; paint(); toast(r.message); } else if (r.error) toast(r.error, true); }; d.append(b); }
+      return d;
+    };
+    const p = el('p', ''); p.append(document.createTextNode('Pour savoir comment récupérer tes fichiers, contacte-moi sur '), discordLink(), document.createTextNode(' : je t\'explique.'));
+    const actions = el('div', 'modal-actions');
+    const close = el('button', 'btn-ghost', 'Fermer'); close.onclick = closeModal;
+    const go = el('button', 'btn-white', 'Lancer le jeu'); go.onclick = () => { closeModal(); play(g.id); };
+    const dc = el('button', 'btn-ghost', 'Discord'); dc.onclick = () => arcadia.openUrl(DISCORD);
+    const paint = () => { st.replaceChildren(line(!need.mcpx, 'MCPX', 'mcpx', 'Choisir…'), line(!need.bios, 'BIOS Xbox', 'bios', 'Choisir…'), line(!need.hdd, 'Disque dur', 'hdd', 'Télécharger')); go.classList.toggle('hidden', need.mcpx || need.bios || need.hdd); };
+    arcadia.onXboxProgress(x => { if (x.total) fill.style.width = Math.round(100 * x.got / x.total) + '%'; });
+    paint(); card.append(p);
+    actions.append(close, dc, go); card.append(actions);
+  });
+}
+// Paramètres : BIOS des consoles (fournis par l'utilisateur) + firmware PS3
+async function biosGroup() {
+  const st = await arcadia.biosStatus().catch(() => ({}));
+  const rows = [];
+  const info = { PS1: 'Facultatif : active la PS1 en haute définition (SwanStation). Sans lui, le BIOS intégré suffit.', PS2: 'Obligatoire pour jouer à la PS2 dans le moteur Arcadia.', DREAMCAST: 'Facultatif : quelques jeux Dreamcast le demandent.' };
+  for (const [id, b] of Object.entries(st)) {
+    const r = el('div', 'tool');
+    const td = el('div', 'td'); td.append(el('b', '', b.label), el('div', '', (b.files.length ? `✓ Installé (${b.files.join(', ')}). ` : '') + (info[id] || '')));
+    const btn = el('button', b.files.length ? 'btn-ghost' : 'btn-white', b.files.length ? 'Remplacer…' : 'Installer mon BIOS…');
+    btn.onclick = async () => { const x = await arcadia.biosInstall(id); if (x.ok) { S = x.state; toast(x.message); SET.render(); } else if (x.error) toast(x.error, true); };
+    r.append(td, btn); rows.push(r);
+  }
+  const fw = el('div', 'tool');
+  const ftd = el('div', 'td'); ftd.append(el('b', '', 'Firmware PS3'), el('div', '', 'Logiciel système officiel de Sony, gratuit : Arcadia le télécharge et l\'installe dans le moteur PS3.'));
+  const fb = el('button', 'btn-ghost', 'Installer…'); fb.onclick = () => { closeModal(); ps3FirmwareModal(null); };
+  fw.append(ftd, fb); rows.push(fw);
+  return group('BIOS et firmware des consoles', rows, 'Ces fichiers appartiennent aux fabricants : Arcadia ne les fournit jamais. Les BIOS viennent de ta propre console.');
 }

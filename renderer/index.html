@@ -2,11 +2,14 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' media: data:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' media: data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'">
   <title>Arcadia</title>
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="theme-neon.css">
 </head>
 <body>
+<div id="app-bg"><div id="app-bg-img"></div><div id="app-bg-dim"></div></div>
   <!-- Barre du haut -->
   <header class="topbar">
     <div class="brand" id="brand"><img class="brand-logo" src="logo-128.png" alt=""><span class="brand-word"></span></div>
@@ -17,7 +20,7 @@
     <div class="top-actions">
       <button id="btn-add" class="top-btn" title="Ajouter des ROM (ou glisse-les dans la fenêtre)">＋ Ajouter des jeux</button>
       <button id="btn-emus" class="top-btn" title="Paramètres (Ctrl+,)">⚙ Paramètres</button>
-      <button id="btn-bp" class="top-btn" title="BigPicture : plein écran, navigation à la manette">BigPicture</button>
+      <button id="btn-bp" class="top-btn" title="Mode Canapé : plein écran, navigation à la manette">Mode Canapé</button>
       <button id="btn-full" class="top-btn icon" title="Plein écran (F11)">⛶</button>
       <button id="btn-folder" class="top-btn icon" title="Ouvrir le dossier de la bibliothèque">📁</button>
     </div>
@@ -184,7 +187,7 @@
     </div>
     <div class="bp-caption"><span id="bp-title"></span><span id="bp-sub"></span></div>
     <div id="bp-tiles" class="bp-tiles"></div>
-    <div class="bp-hints"><span><b>LB</b><b>RB</b> Console</span><span><b>A</b> Jouer</span><span><b>Y</b> Favori</span><span><b>X</b> Détails</span><span><b>B</b> Quitter BigPicture</span></div>
+    <div class="bp-hints"><span><b>LB</b><b>RB</b> Console</span><span><b>A</b> Jouer</span><span><b>Y</b> Favori</span><span><b>X</b> Détails</span><span><b>B</b> Quitter le Mode Canapé</span></div>
   </div>
 
   <!-- Intro -->

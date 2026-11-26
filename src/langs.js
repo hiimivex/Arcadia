@@ -32,13 +32,23 @@ function fromSmdh(b) {
 // Consoles où la langue suit le réglage de la console émulée (la ROM ne les liste pas)
 const CONSOLE_LANGS = {
   PSP: ['fr', 'en', 'de', 'it', 'es', 'nl', 'pt', 'ru', 'ja', 'ko', 'zh-Hans', 'zh-Hant'],
-  DS: ['fr', 'en', 'de', 'it', 'es', 'ja']
+  DS: ['fr', 'en', 'de', 'it', 'es', 'ja'],
+  DREAMCAST: ['fr', 'en', 'de', 'it', 'es', 'ja'],
+  GAMECUBE: ['fr', 'en', 'de', 'it', 'es', 'nl', 'ja'],
+  WII: ['fr', 'en', 'de', 'it', 'es', 'nl', 'ja', 'ko', 'zh-Hans', 'zh-Hant'],
+  SWITCH: ['fr', 'en', 'de', 'it', 'es', 'nl', 'pt', 'ru', 'ja', 'ko', 'zh-Hans', 'zh-Hant'],
+  'SWITCH 2': ['fr', 'en', 'de', 'it', 'es', 'nl', 'pt', 'ru', 'ja', 'ko', 'zh-Hans', 'zh-Hant']
 };
+// Consoles dont Arcadia sait régler la langue (langue de la console émulée) ; ailleurs elle est fixée par la ROM
+const SETTABLE = ['PSP', 'DS', '3DS', 'DREAMCAST', 'GAMECUBE', 'WII', 'SWITCH', 'SWITCH 2'];
 
 // Option de cœur du moteur intégré
 const CORE = {
   PSP: { key: 'ppsspp_language', v: { fr: 'French', en: 'English', de: 'German', it: 'Italian', es: 'Spanish', nl: 'Dutch', pt: 'Portuguese', ru: 'Russian', ja: 'Japanese', ko: 'Korean', 'zh-Hans': 'Chinese Simplified', 'zh-Hant': 'Chinese Traditional' } },
   DS: { key: 'melonds_language', v: { fr: 'French', en: 'English', de: 'German', it: 'Italian', es: 'Spanish', ja: 'Japanese' } },
+  DREAMCAST: { key: 'reicast_language', v: { fr: 'French', en: 'English', de: 'German', it: 'Italian', es: 'Spanish', ja: 'Japanese' } },
+  GAMECUBE: { key: 'dolphin_language', v: { ja: '0', en: '1', de: '2', fr: '3', es: '4', it: '5', nl: '6' } },
+  WII: { key: 'dolphin_language', v: { ja: '0', en: '1', de: '2', fr: '3', es: '4', it: '5', nl: '6', 'zh-Hans': '7', 'zh-Hant': '8', ko: '9' } },
   '3DS': { key: 'citra_language_value', v: { fr: 'French', en: 'English', de: 'German', it: 'Italian', es: 'Spanish', nl: 'Dutch', pt: 'Portuguese', ru: 'Russian', ja: 'Japanese', ko: 'Korean', 'zh-Hans': 'Simplified Chinese', 'zh-Hant': 'Traditional Chinese' } }
 };
 const REGION_3DS = l => (l === 'ja' ? 'Japan' : l === 'ko' ? 'Korea' : l === 'zh-Hans' ? 'China' : l === 'zh-Hant' ? 'Taiwan' : ['fr', 'de', 'it', 'nl', 'ru', 'en-GB'].includes(l) ? 'Europe' : null);
@@ -60,10 +70,11 @@ function switchOpts(lang) {
 }
 
 // Langue retenue : choix du joueur, sinon le français si le jeu l'a, sinon rien (réglage du moteur)
+// Langue de la console émulée = français par défaut : un jeu qui ne l'a pas retombe tout seul sur sa langue par défaut.
 function pick(chosen, available) {
   if (chosen && (!available || !available.length || available.includes(chosen))) return chosen;
-  if (available && available.length) return available.find(l => l === 'fr') || available.find(l => l === 'fr-CA') || null;
-  return null;
+  if (available && available.length && !available.includes('fr') && available.includes('fr-CA')) return 'fr-CA';
+  return 'fr';
 }
 
-module.exports = { LANGS, fromNacp, fromSmdh, CONSOLE_LANGS, runnerOpts, switchOpts, pick, sortLangs };
+module.exports = { SETTABLE, LANGS, fromNacp, fromSmdh, CONSOLE_LANGS, runnerOpts, switchOpts, pick, sortLangs };

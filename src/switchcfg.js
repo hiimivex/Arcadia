@@ -4,7 +4,7 @@
 //   - manette : mappage SDL de la manette détectée lors de la dernière session (identifiant lu dans le journal du moteur)
 const fs = require('fs');
 const path = require('path');
-const { qtGet, qtSet } = require('./configfiles');
+const { qtGet, qtSet, iniSet } = require('./configfiles');
 
 // Identifiant SDL de la manette (port 0) tel qu'écrit par le moteur dans son journal
 function padGuidFromLog(userDir) {
@@ -103,23 +103,77 @@ function dsuMapping() {
   };
 }
 
+// Moteur Switch d'Arcadia (arcadia-switch) : il lit lui-même manette + clavier et les fusionne dans sa manette
+// virtuelle (port 0) ; les vibrations repartent de là vers la vraie manette.
+function virtualMapping() {
+  const V = 'engine:virtual_gamepad,port:0';
+  const b = id => `"${V},button:${id}"`;
+  const st = (x, y) => `"${V},axis_x:${x},axis_y:${y},deadzone:0.000000,range:1.000000"`;
+  return {
+    player_0_button_a: b(0), player_0_button_b: b(1), player_0_button_x: b(2), player_0_button_y: b(3),
+    player_0_button_lstick: b(4), player_0_button_rstick: b(5), player_0_button_l: b(6), player_0_button_r: b(7),
+    player_0_button_zl: b(8), player_0_button_zr: b(9), player_0_button_plus: b(10), player_0_button_minus: b(11),
+    player_0_button_dleft: b(12), player_0_button_dup: b(13), player_0_button_dright: b(14), player_0_button_ddown: b(15),
+    player_0_button_home: b(18), player_0_button_screenshot: b(19),
+    player_0_lstick: st(0, 1), player_0_rstick: st(2, 3)
+  };
+}
+
+// Réglages généraux choisis dans Arcadia (page de l'émulateur Switch, qualité graphique) : ils sont écrits dans
+// qt-config.ini, mais le moteur sans interface lit sdl2-config.ini → on les recopie avant chaque lancement.
+const SYNC_SECTIONS = ['Renderer', 'Core', 'Cpu', 'Audio', 'System'];
+const SYNC_SKIP = new Set(['fullscreen_mode', 'use_docked_mode']);
+function syncFromQt(userDir, t) {
+  let q = '';
+  try { q = fs.readFileSync(path.join(userDir, 'config', 'qt-config.ini'), 'utf8'); } catch { return t; }
+  let sec = null;
+  for (const line of q.split(/\r?\n/)) {
+    const h = /^\[(.+)\]\s*$/.exec(line); if (h) { sec = h[1]; continue; }
+    if (!sec || !SYNC_SECTIONS.includes(sec)) continue;
+    const m = /^([^=\\]+?)(\\default)?=(.*)$/.exec(line); if (!m) continue;
+    if (SYNC_SKIP.has(m[1])) continue;
+    t = iniSet(t, sec, m[1] + (m[2] || ''), m[3]);
+  }
+  return t;
+}
+
 // Prépare sdl2-config.ini. Renvoie { pad: guid|null }
-function prepare(userDir, { docked = true, guid: chosen = '', mapping: chosenMap = '', opts = {}, keyboard = false, dsu = false } = {}) {
+function prepare(userDir, { docked = true, guid: chosen = '', mapping: chosenMap = '', opts = {}, keyboard = false, dsu = false, arcadia = false } = {}) {
   const file = path.join(userDir, 'config', 'sdl2-config.ini');
   let t = '';
   try { t = fs.readFileSync(file, 'utf8'); } catch { /* le moteur le créera, on écrit le minimum */ }
+  t = syncFromQt(userDir, t);
   t = qtSet(t, 'Renderer', 'fullscreen_mode', '0', '0');          // sans bordure
   t = qtSet(t, 'System', 'use_docked_mode', docked ? '1' : '0', '0'); // défaut du moteur : portable
+  if (arcadia) { // moteur Arcadia : tout passe par sa manette virtuelle
+    for (const [k, v] of Object.entries(virtualMapping())) t = qtSet(t, 'Controls', k, v, '');
+    t = qtSet(t, 'Controls', 'player_0_connected', 'true', 'true');
+    t = qtSet(t, 'Controls', 'player_0_type', '0', '0');
+    t = qtSet(t, 'Controls', 'player_0_vibration_enabled', 'true', 'true');
+    t = qtSet(t, 'Controls', 'vibration_enabled', 'true', 'true');
+    t = qtSet(t, 'Controls', 'enable_udp_controller', 'false', 'false');
+  }
   // la manette vue par le moteur lui-même (GUID SDL exact), sinon celle choisie dans Arcadia
-  if (dsu) { // manette + clavier en même temps, via Arcadia
+  if (arcadia) { /* rien d'autre */ } else if (dsu) { // manette + clavier en même temps, via Arcadia
     for (const [k, v] of Object.entries(dsuMapping())) t = qtSet(t, 'Controls', k, v, '');
     t = qtSet(t, 'Controls', 'player_0_connected', 'true', 'true');
     t = qtSet(t, 'Controls', 'player_0_type', '0', '0');
     t = qtSet(t, 'Controls', 'udp_input_servers', '127.0.0.1:26760', '127.0.0.1:26760');
+    // sans ça, le moteur ne lit que le gyroscope des manettes réseau et ignore boutons et sticks
+    t = qtSet(t, 'Controls', 'enable_udp_controller', 'true', 'false');
+    // vibrations : le moteur les envoie à l'appareil relié à « croix droite » (côté gauche) et « A » (côté droit).
+    // La manette réseau ne vibre pas : on relie « croix droite » directement à la vraie manette.
+    const vg = padGuidFromLog(userDir) || chosen;
+    if (vg) {
+      const sdl = (vg === padGuidFromLog(userDir) ? padMappingFromLog(userDir, vg) : '') || (vg === chosen ? chosenMap : '');
+      const direct = sdlToSwitch(vg, sdl) || xboxMapping(vg);
+      t = qtSet(t, 'Controls', 'player_0_button_dright', direct.player_0_button_dright, '');
+      t = qtSet(t, 'Controls', 'player_0_vibration_enabled', 'true', 'true');
+    }
   }
-  const logGuid = keyboard || dsu ? null : padGuidFromLog(userDir);
-  const guid = keyboard || dsu ? null : logGuid || chosen;
-  if (dsu) { /* déjà fait */ } else if (keyboard) {
+  const logGuid = keyboard || dsu || arcadia ? null : padGuidFromLog(userDir);
+  const guid = keyboard || dsu || arcadia ? null : logGuid || chosen;
+  if (dsu || arcadia) { /* déjà fait */ } else if (keyboard) {
     // clavier : on retire les touches manette écrites par Arcadia → le moteur reprend ses touches clavier par défaut
     const lines = t.split(/\r?\n/);
     const sdlKeys = new Set(lines.map(l => /^(player_0_(?:button_\w+|lstick|rstick))="?engine:sdl/.exec(l)).filter(Boolean).map(m => m[1]));
@@ -138,7 +192,7 @@ function prepare(userDir, { docked = true, guid: chosen = '', mapping: chosenMap
   }
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, t);
-  return { pad: dsu ? 'arcadia' : guid };
+  return { pad: dsu || arcadia ? 'arcadia' : guid };
 }
 
 // Valeurs actuelles de quelques réglages (pour le menu Arcadia)
@@ -150,4 +204,4 @@ function readOpts(userDir, keys) {
   return out;
 }
 
-module.exports = { dsuMapping, edenGuid, prepare, readOpts, padGuidFromLog, padMappingFromLog, sdlToSwitch, xboxMapping };
+module.exports = { syncFromQt, virtualMapping, dsuMapping, edenGuid, prepare, readOpts, padGuidFromLog, padMappingFromLog, sdlToSwitch, xboxMapping };

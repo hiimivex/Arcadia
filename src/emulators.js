@@ -107,7 +107,7 @@ function parseArgs(template, vars) {
   let m;
   while ((m = re.exec(template)) !== null) {
     const raw = m[1] !== undefined ? m[1] : m[2];
-    out.push(raw.replace(/\{(\w+)\}/g, (_, k) => (vars[k] !== undefined ? vars[k] : '')));
+    out.push(raw.replace(/\{(\w+)\}/g, (_, k) => (vars[k] !== undefined ? vars[k] : /^(nup|nsp|xci|xcz|nsz|iso|game|file|path)$/i.test(k) ? (vars.rom || '') : '')));
   }
   return out;
 }

@@ -1,0 +1,152 @@
+/* Arcadia — thème « Néon » : arcade rétro-futuriste, angles nets, labels en police mono.
+   Se pose par-dessus styles.css. Fond perso et palette auto (fond d'écran, perso, Windows) restent
+   gérés par --accent / --on-accent : le menthe n'est que la couleur par défaut. */
+@font-face { font-family: 'Space Grotesk'; font-weight: 400; font-display: swap; src: url('fonts/space-grotesk-latin-400-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Space Grotesk'; font-weight: 500; font-display: swap; src: url('fonts/space-grotesk-latin-500-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Space Grotesk'; font-weight: 600 800; font-display: swap; src: url('fonts/space-grotesk-latin-700-normal.woff2') format('woff2'); }
+@font-face { font-family: 'JetBrains Mono'; font-weight: 400; font-display: swap; src: url('fonts/jetbrains-mono-latin-400-normal.woff2') format('woff2'); }
+@font-face { font-family: 'JetBrains Mono'; font-weight: 500 800; font-display: swap; src: url('fonts/jetbrains-mono-latin-600-normal.woff2') format('woff2'); }
+
+:root {
+  --bg: #07080b;
+  --bg-2: #090c0e;
+  --panel: #0c1012;
+  --panel-2: #101618;
+  --panel-3: #16201f;
+  --line: #16201f;
+  --line-2: #24403b;
+  --text: #e9f1f0;
+  --muted: #7c8b8a;
+  --dim: #5d6b6a;
+  --white: #e9f1f0;
+  --accent: #39e5c8;
+  --on-accent: #04110f;
+  --r-sm: 2px; --r: 2px; --r-lg: 3px;
+  --mono: 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+  --glow: 0 0 18px color-mix(in srgb, var(--accent) 22%, transparent);
+  --glow-strong: 0 0 26px color-mix(in srgb, var(--accent) 38%, transparent), 0 0 1px var(--accent);
+  font-family: 'Space Grotesk', 'Segoe UI', system-ui, sans-serif;
+}
+body.glow-off { --glow: none; --glow-strong: 0 0 0 1px var(--accent); }
+body.glow-soft { --glow: 0 0 12px color-mix(in srgb, var(--accent) 12%, transparent); --glow-strong: 0 0 16px color-mix(in srgb, var(--accent) 24%, transparent), 0 0 1px var(--accent); }
+body.glow-strong { --glow: 0 0 24px color-mix(in srgb, var(--accent) 34%, transparent); --glow-strong: 0 0 36px color-mix(in srgb, var(--accent) 55%, transparent), 0 0 1px var(--accent); }
+
+/* angles nets partout */
+*, *::before, *::after { border-radius: 2px !important; }
+
+/* fond quadrillé (fond par défaut seulement : un fond perso reste visible tel quel) */
+html:not(.bg-custom):not(.bg-transparent) body {
+  background-color: var(--bg);
+  background-image: linear-gradient(color-mix(in srgb, var(--accent) 5%, transparent) 1px, transparent 1px),
+                    linear-gradient(90deg, color-mix(in srgb, var(--accent) 5%, transparent) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+/* labels, onglets, boutons : police mono en capitales */
+.tab, .side-home, .shelf-head h2, .stat-label, .panel h3, .about h3, .nav-title, .rs-label, .card .cons, .card .running-badge,
+.btn-white, .btn-ghost, .chip, .seg button, .eng-state, .upd-go, .rs-go-txt span {
+  font-family: var(--mono); letter-spacing: .07em;
+}
+.tab, .side-home, .shelf-head h2, .stat-label, .panel h3, .about h3, .nav-title, .rs-label, .card .cons, .card .running-badge, .btn-white, .upd-go {
+  text-transform: uppercase;
+}
+.btn-white { font-weight: 600; font-size: 12px; padding: 10px 20px; }
+.btn-white:hover { box-shadow: var(--glow-strong); filter: brightness(1.08); }
+.btn-ghost { background: transparent; border-color: var(--line-2); font-size: 12px; }
+.btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+.shelf-head h2::before { content: '// '; color: var(--accent); }
+.topbar { background: rgba(7, 8, 11, .88); }
+.tab.active, .side-home.active { box-shadow: var(--glow); }
+.top-btn { background: transparent; border-color: var(--line-2); }
+.top-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+/* jaquettes : liseré + coins lumineux au survol */
+.card-art { border-color: var(--line); }
+.card:hover .card-art, .card:focus-visible .card-art { border-color: var(--accent); box-shadow: var(--glow-strong); transform: translateY(-3px); }
+.card-art::after { content: ''; position: absolute; inset: -1px; pointer-events: none; opacity: 0; transition: opacity .15s;
+  background:
+    linear-gradient(var(--accent), var(--accent)) top left / 14px 2px no-repeat,
+    linear-gradient(var(--accent), var(--accent)) top left / 2px 14px no-repeat,
+    linear-gradient(var(--accent), var(--accent)) bottom right / 14px 2px no-repeat,
+    linear-gradient(var(--accent), var(--accent)) bottom right / 2px 14px no-repeat; }
+.card:hover .card-art::after, .card.sel .card-art::after { opacity: 1; }
+.card .cons { background: rgba(7, 8, 11, .85); border-color: var(--line-2); color: var(--accent); font-weight: 600; }
+.card-title { font-weight: 700; }
+
+/* champs et menus */
+input[type=text], input[type=search], input[type=number], select, textarea { font-family: var(--mono); }
+.modal-card { background: var(--panel); border-color: var(--line-2); }
+.modal-card h2 { font-weight: 700; letter-spacing: .01em; }
+.panel { background: color-mix(in srgb, var(--panel) 92%, transparent); }
+
+/* barres de défilement fines */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: var(--line-2); }
+::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* éléments « blancs » de l'ancien thème → couleur des boutons */
+.perf-btn.on { background: var(--accent); border-color: var(--accent); }
+.perf-btn.on, .perf-btn.on * { color: var(--on-accent) !important; }
+.bp-hints b, .in-key kbd, .in-facts b, .fw-bar > div, .wi-btn:hover { background: var(--accent) !important; color: var(--on-accent) !important; }
+.in-key kbd { font-family: var(--mono); }
+
+/* fond perso : menu de gauche et barre du haut bien lisibles, fond identique partout (pas d'image du jeu par-dessus) */
+html.bg-custom .sidebar, html.bg-transparent .sidebar { background: rgba(7, 8, 11, .86); backdrop-filter: blur(22px) saturate(1.1); }
+html.bg-custom .topbar, html.bg-transparent .topbar { background: rgba(7, 8, 11, .84); backdrop-filter: blur(22px); }
+html.bg-custom .hero-bg { display: none; }
+html.bg-custom .hero::after { background: none; }
+.toast { display: flex; align-items: center; gap: 14px; }
+.toast-act { border: 1px solid currentColor; background: transparent; color: inherit; padding: 5px 10px; font: 600 11px var(--mono); letter-spacing: .07em; text-transform: uppercase; cursor: pointer; }
+
+/* Mode Canapé (BigPicture) */
+.bp-tabs button { font-family: var(--mono); letter-spacing: .1em; border: 1px solid var(--line-2); background: rgba(7, 8, 11, .6); color: var(--muted); }
+.bp-tabs button.on { background: var(--accent); color: var(--on-accent); border-color: var(--accent); box-shadow: var(--glow-strong); }
+.bp-clock { font-family: var(--mono); }
+.bp-item { border: 1px solid var(--line-2); }
+.bp-item.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 0 60px color-mix(in srgb, var(--accent) 40%, transparent), 0 24px 60px rgba(0,0,0,.7); }
+.bp-item.fav::after { color: var(--accent); text-shadow: 0 0 12px var(--accent); }
+.bp-caption #bp-title { font-size: 1.3em; text-transform: uppercase; letter-spacing: .03em; }
+.bp-caption #bp-sub { font-family: var(--mono); color: var(--accent); opacity: 1; }
+.bp-tile { border: 1px solid var(--line-2); font-family: var(--mono); text-transform: uppercase; letter-spacing: .08em; }
+.bp-tile.on, .bp-tile:focus { border-color: var(--accent); box-shadow: 0 0 40px color-mix(in srgb, var(--accent) 30%, transparent); }
+.bp-hints { font-family: var(--mono); text-transform: uppercase; letter-spacing: .06em; font-size: 13px; }
+.bp-hints b { background: var(--accent) !important; color: var(--on-accent) !important; }
+
+/* écran de mise à jour (dissolution en pixels) */
+.upd-screen { position: fixed; inset: 0; z-index: 10000; }
+.upd-screen canvas { position: absolute; inset: 0; image-rendering: pixelated; }
+.upd-txt { position: absolute; z-index: 1; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 26px 40px; background: #07080b; display: flex; flex-direction: column; align-items: center; gap: 10px; opacity: 0; transition: opacity .4s; }
+.upd-txt.show { opacity: 1; }
+.upd-txt b { font: 700 34px 'Space Grotesk', sans-serif; letter-spacing: .3em; text-transform: uppercase; color: #e9f1f0; }
+.upd-txt span { font: 600 12px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--accent); }
+.upd-bar { width: 260px; height: 4px; background: #16201f; margin-top: 8px; }
+.upd-bar > div { height: 100%; width: 0; background: var(--accent); box-shadow: 0 0 12px var(--accent); transition: width .1s linear; }
+.wall-item.loading { background-image: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 8%, transparent), transparent) !important; background-size: 200% 100% !important; animation: wallShimmer 1.2s linear infinite; }
+.wall-item.loading .wi-info, .wall-item.loading .wi-acts { display: none; }
+@keyframes wallShimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+/* le fond ne change jamais selon le jeu */
+.main::before { display: none !important; }
+
+/* Transparence Windows (acrylique) : jamais de zone 100 % transparente ni de flou CSS par-dessus,
+   sinon Chromium ne réefface pas l'écran et laisse des traînées en défilant */
+html.bg-transparent, html.bg-transparent body { background: rgba(7, 8, 11, .42) !important; }
+html.bg-transparent * { backdrop-filter: none !important; }
+html.bg-transparent .sidebar, html.bg-transparent .topbar { background: rgba(7, 8, 11, .7); }
+html.bg-transparent .main, html.bg-transparent #main { background: rgba(7, 8, 11, .18); }
+
+/* premier lancement + visite guidée */
+.modal-card.fr-modal { width: min(560px, 92vw); }
+.fr-tag { font: 600 11px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--accent); margin-bottom: 6px; }
+.fr-warn { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; margin: 14px 0 6px; padding: 14px 16px; border: 1px solid #ffb454; background: rgba(255, 180, 84, .07); }
+.fr-warn b { color: #ffb454; font: 600 12px var(--mono); letter-spacing: .07em; text-transform: uppercase; }
+.fr-warn span { color: #d8dcdc; line-height: 1.5; }
+.fr-warn button { margin-top: 6px; }
+.tour { position: fixed; inset: 0; z-index: 9500; }
+.tour-hole { position: fixed; box-shadow: 0 0 0 9999px rgba(3, 5, 7, .78); border: 2px solid var(--accent); transition: all .3s ease; pointer-events: none; }
+.tour-hole.none { left: 50%; top: 50%; width: 0; height: 0; border: 0; }
+.tour-card { position: fixed; width: 380px; padding: 18px 20px; background: var(--panel); border: 1px solid var(--line-2); box-shadow: var(--glow), 0 20px 50px rgba(0,0,0,.6); display: flex; flex-direction: column; gap: 8px; }
+.tour-card.center { left: 50%; top: 50%; transform: translate(-50%, -50%); }
+.tour-card b { font-size: 18px; } .tour-card p { margin: 0; color: #c9d2d1; line-height: 1.55; }
+.tour-step { font: 600 11px var(--mono); color: var(--accent); letter-spacing: .1em; }
+.tour-nav { display: flex; gap: 8px; align-items: center; margin-top: 8px; } .tour-nav .spacer { flex: 1; }

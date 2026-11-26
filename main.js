@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, protocol, net, shell, globalShortcut, screen, desktopCapturer, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, protocol, net, shell, globalShortcut, screen, desktopCapturer, nativeImage, systemPreferences } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -15,6 +15,9 @@ const Proc = require('./src/proctl');
 const Brand = require('./src/brand');
 const { Helper } = require('./src/helper');
 const Langs = require('./src/langs');
+const RomLangs = require('./src/romlangs');
+const Controls = require('./src/controls');
+const Patches = require('./src/patches');
 const AUMID = 'dev.arcadia.launcher';
 const ARCADIA_ICO = () => path.join(runnerDir(), 'arcadia.ico'); // hors de l'archive : lisible par le compagnon natif
 const helper = new Helper(path.join(app.isPackaged ? path.join(process.resourcesPath, 'runner') : path.join(__dirname, 'runner'), 'arcadia-helper.exe'), m => log?.write('INFO', m));
@@ -27,7 +30,10 @@ const { SwitchDb, titleIdFrom } = require('./src/switchdb');
 const { Importer, move, uniqueDest, extractArchive } = require('./src/importer');
 const { SOURCES, installEmulator, latestAsset } = require('./src/emuinstall');
 const { PRESETS, UNLOCKS, PADS } = require('./src/presets');
-const { watchPad, closeProcess } = require('./src/padwatch');
+const { watchPad, closeProcess: closeProcessRaw } = require('./src/padwatch');
+// Processus fermés par Arcadia (menu « Quitter », combo manette) : leur sortie n'est pas un plantage
+const closedByArcadia = new Set();
+const closeProcess = (pid, ...rest) => { closedByArcadia.add(pid); return closeProcessRaw(pid, ...rest); };
 const Saves = require('./src/saves');
 const { Discord } = require('./src/discord');
 const discord = new Discord();
@@ -48,7 +54,16 @@ const DEFAULT_SETTINGS = {
   viewMode: 'grid',          // grid | list
   glow: 'medium',            // off | soft | medium | strong
   uiSounds: true,            // petits sons d'interface
-  accentByConsole: false,    // lueur à la couleur de la console
+  bgMode: 'default',         // fond : default | custom (image) | solid (couleur unie) | transparent (Windows derrière)
+  bgImage: '', bgBlur: 18, bgDim: 55, bgColor: '#0b0b0b',
+  accentMode: 'image',       // couleur des boutons : image (palette du fond) | custom | windows
+  accentColor: '#ffffff',
+  accentByConsole: false,
+  couchAuto: true,
+  fpsHud: false,
+  fps60Auto: true,          // patchs 60 images/s automatiques (Switch, PSP, PS1)            // compteur d'images/s par-dessus le jeu
+  fpsHudPos: 'tl',          // tl tr bl br
+  fpsHudSize: 'm',          // s m l         // Mode Canapé quand une manette s'allume    // lueur à la couleur de la console
   bigPictureOnStart: false,  // démarrer en mode TV
   autoBackup: true,          // copie des sauvegardes à la fermeture d'un jeu
   savesDir: '',              // '' = <Arcadia>\saves
@@ -57,6 +72,7 @@ const DEFAULT_SETTINGS = {
   remoteEnabled: false,      // lancer les jeux depuis son téléphone (même Wi-Fi)
   padQuit: true,             // Back + Start maintenus 1,5 s = quitter le jeu
   useRunner: true,
+  switchEngine: 'arcadia', // 'arcadia' = moteur Switch d'Arcadia ; 'eden' = moteur Eden d'origine
   sgdbKey: '',
   input: null,               // manette choisie au premier lancement : { type: keyboard|xbox|switch|generic, guid, name, known }
   resumePrompt: true,
@@ -73,7 +89,9 @@ let pendingLaunch = launchArg(process.argv);
 app.on('second-instance', (_e, argv) => {
   const id = launchArg(argv);
   if (id) { launchOutside(id); return; }
-  if (win) { if (win.isMinimized()) win.restore(); win.focus(); }
+  if (!win || win.isDestroyed()) { createWindow(); return; }
+  if (win.isMinimized()) win.restore();
+  win.show(); win.focus();
 });
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'media', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
@@ -89,14 +107,16 @@ function isInside(child, parent) {
 function createWindow() {
   win = new BrowserWindow({
     width: 1500, height: 920, minWidth: 1100, minHeight: 680,
-    backgroundColor: '#171d25',
+    backgroundColor: '#00000000', // fond géré par l'interface (image, couleur ou transparence Windows)
     title: 'Arcadia',
     icon: path.join(__dirname, 'build', 'icon.png'),
     autoHideMenuBar: true,
     show: false,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: false }
   });
-  win.once('ready-to-show', () => win.show());
+  win.once('ready-to-show', () => { win.show(); applyWindowMaterial(); });
+  // fenêtre principale fermée : Arcadia se ferme vraiment (le menu Échap et le compteur, invisibles, ne doivent pas le garder en vie)
+  win.on('closed', () => { win = null; try { hudStop(); } catch { /* */ } for (const w of BrowserWindow.getAllWindows()) { try { w.destroy(); } catch { /* */ } } app.quit(); });
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   // Les fichiers déposés hors de la zone prévue ne doivent pas ouvrir de nouvelle page.
   win.webContents.on('will-navigate', e => e.preventDefault());
@@ -130,7 +150,7 @@ app.whenReady().then(() => {
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 
-app.whenReady().then(() => { if (helper.available) helper.start(); });
+app.whenReady().then(() => { if (helper.available) helper.start(); watchUpdates(); });
 app.on('before-quit', () => { helper.stop(); try { backupStore(store.file, path.join(savesRoot(), '_arcadia')); } catch { /* */ } });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 
@@ -157,6 +177,8 @@ let ROOT = null;
 function setupRoot() {
   ROOT = arcadiaRoot();
   if (!ROOT) return;
+  // où tourne Arcadia (et quelle version) : les mises à jour visent toujours la bonne installation
+  try { fs.writeFileSync(path.join(ROOT, '.arcadia-app.json'), JSON.stringify({ version: app.getVersion(), exe: app.getPath('exe'), resources: process.resourcesPath, at: new Date().toISOString() }, null, 1)); } catch { /* dossier en lecture seule */ }
   const lib = LIB_DIR(), emu = EMU_DIR();
   fs.mkdirSync(lib, { recursive: true });
   fs.mkdirSync(emu, { recursive: true });
@@ -206,6 +228,11 @@ function repairMapping() {
   for (const [cid, setup] of Object.entries(buildDefaultMapping(found))) if (!mapping[cid] || checkSetup(mapping[cid])) mapping[cid] = setup;
   store.set('mapping', mapping);
   try { repairGameSettings(found); } catch { /* */ }
+  // 1.16 : plus de choix de moteur dans l'interface → les anciens choix (moteur Switch, moteur intégré coupé) sont oubliés
+  if (store.data.engineChoiceReset !== 1) {
+    const st = { ...(store.data.settings || {}) }; delete st.useRunner; delete st.switchEngine;
+    store.data.settings = st; store.data.engineChoiceReset = 1; store.save();
+  }
 }
 
 function emuCandidates() {
@@ -257,8 +284,11 @@ function decorate(g) {
     broken: !!m.broken,
     patch: !!m.patch,
     titleId: m.titleId || null,
-    langs: m.langs || Langs.CONSOLE_LANGS[g.console] || null, // langues proposées (lues dans la ROM, sinon celles de la console)
-    langsFromRom: !!m.langs,
+    // langues proposées : lues dans la ROM (Switch, 3DS), sinon déduites de sa région, sinon celles de la console
+    langs: Langs.SETTABLE.includes(g.console) ? (m.langs || Langs.CONSOLE_LANGS[g.console] || null) : null,
+    langsFromRom: !!m.langs, langsFrom: m.langs ? (m.langsFrom || 'rom') : 'console',
+    langSettable: Langs.SETTABLE.includes(g.console),
+    region: m.region || null, romLangs: m.langs || null,
     coverSquare: !custom && (isSwitch(g) || (!g.cover && !!m.coverSquare)), // icônes eShop carrées
     cover: custom && fs.existsSync(custom) ? custom : g.cover || (m.cover && fs.existsSync(m.cover) ? m.cover : null)
   };
@@ -285,8 +315,10 @@ function snapshot() {
     savesRoot: savesRoot(),
     version: require('./package.json').version,
     runnerConsoles: Object.keys(RUNNER_CORES).filter(c => runnerFor(c)),
+    switchEngine: !!arcadiaSwitchExe(),
+    appVersion: app.getVersion(),
     hardware: HW_CACHE,
-    status: Object.fromEntries(CONSOLES.map(c => [c.id, checkSetup(mapping[c.id])]))
+    status: Object.fromEntries(CONSOLES.map(c => [c.id, (c.id === 'SWITCH' || c.id === 'SWITCH 2') && !mapping[c.id] && arcadiaSwitchExe() ? null : checkSetup(mapping[c.id])]))
   };
 }
 
@@ -325,6 +357,7 @@ function rescan() {
   store.save();
   queueMedia();
   watchLibrary();
+  setTimeout(() => fps60Sweep().catch(() => {}), 15000); // patchs 60 images/s des jeux Switch, en arrière-plan
 }
 
 // Démarrage instantané : la dernière liste connue s'affiche tout de suite, l'analyse se fait juste après.
@@ -382,14 +415,19 @@ async function queueMedia() {
     const keys = games.some(isSwitch) ? switchKeys() : null;
     for (const g of games) {
       // pour la Switch, l'ajout des clés plus tard relance l'extraction
-      const sig = `${g.size}:${Math.round(g.mtime || 0)}` + (isSwitch(g) && keys ? ':k' : '') + ':L1'; // L1 : relit les langues de la ROM
+      const sig = `${g.size}:${Math.round(g.mtime || 0)}` + (isSwitch(g) && keys ? ':k' : '') + ':L2P2'; // L2 : région + langues lues dans l'en-tête de la ROM ; P : [vNNN] d'un jeu complet ≠ mise à jour
       const m = media[g.id] || {};
       if (m.sig === sig && 'broken' in m && !(isSwitch(g) && !('titleId' in m))) continue;
       let info = null;
       let idInfo = null;
       if (isSwitch(g)) { try { info = switchInfo(g.path, keys); } catch { info = null; } try { idInfo = switchIdNoKeys(g.path); } catch { /* */ } }
       else info = extractInfo(g);
-      const next = { ...m, sig, broken: looksEmpty(g.path), patch: !!(idInfo?.patch || /\[v[1-9]\d{3,}\]|0100[0-9A-F]{9}800\b/i.test(g.file)), title: info?.title || null, pixel: !!info?.pixel, icon: null, serial: info?.serial || null, langs: info?.langs && info.langs.length ? info.langs : null, titleId: info?.titleId || keylessId(g) || titleIdFrom(g.file) };
+      const next = { ...m, sig, broken: looksEmpty(g.path), patch: !!(idInfo?.patch || /[\[(]\s*(dlc|update|updates?|patch|add-?on|mise [àa] jour|maj)\b/i.test(g.file) || /\b0[0-9A-F]{12}800\b/i.test(g.file) || (!/\b0[0-9A-F]{15}\b/i.test(g.file) && /\[v[1-9]\d{3,}\]/i.test(g.file))), title: info?.title || null, pixel: !!info?.pixel, icon: null, serial: info?.serial || null, langs: info?.langs && info.langs.length ? info.langs : null, titleId: info?.titleId || keylessId(g) || titleIdFrom(g.file) };
+      if (!next.langs || !isSwitch(g)) { // pas de liste dans les métadonnées : région lue dans l'en-tête
+        let r = null; try { r = RomLangs.detect(g, info); } catch { /* en-tête illisible */ }
+        next.region = r?.region || null; if (!next.serial && r?.serial) next.serial = r.serial;
+        if (!next.langs && r?.langs) { next.langs = r.langs; next.langsFrom = 'region'; } else if (next.langs) next.langsFrom = 'rom';
+      } else next.langsFrom = 'rom';
       if (info?.icon) { next.icon = mediaPath('icons', g.id, info.iconExt || 'png'); fs.writeFileSync(next.icon, info.icon); }
       media[g.id] = next;
       pushUpdate(g.id);
@@ -441,9 +479,9 @@ function keylessId(g) { try { return switchIdNoKeys(g.path)?.titleId || null; } 
 // prod.keys / title.keys d'Eden et Lichii (installation normale ou portable)
 function switchKeys() {
   const dirs = [];
-  for (const id of ['eden', 'lichii']) {
+  for (const id of ['eden', 'lichii', 'edencli']) {
     const ctx = emuCtx(id);
-    dirs.push(path.join(ctx.exeDir, 'user', 'keys'), path.join(ctx.appData, id, 'keys'));
+    dirs.push(path.join(ctx.exeDir, 'user', 'keys'), path.join(ctx.appData, id === 'edencli' ? 'eden' : id, 'keys'));
   }
   dirs.push(path.join(app.getPath('appData'), 'yuzu', 'keys'));
   return loadKeys(dirs);
@@ -661,16 +699,20 @@ function findUpdate() {
     let names = [];
     try { names = fs.readdirSync(d); } catch { continue; }
     for (const n of names) {
-      const m = n.match(/^Arcadia-Setup-(\d+\.\d+\.\d+)\.exe$/i);
-      if (m && verNum(m[1]) > verNum(app.getVersion()) && (!best || verNum(m[1]) > verNum(best.version))) best = { version: m[1], file: path.join(d, n) };
+      // installeur complet, ou mise à jour rapide (seulement l'application : Arcadia-Update-x.y.z.asar)
+      const m = n.match(/^Arcadia-(Setup|Update)-(\d+\.\d+\.\d+)\.(exe|asar)$/i);
+      if (!m || (m[1].toLowerCase() === 'setup') !== (m[3].toLowerCase() === 'exe')) continue;
+      if (verNum(m[2]) > verNum(app.getVersion()) && (!best || verNum(m[2]) > verNum(best.version) || (m[2] === best.version && best.quick)))
+        best = { version: m[2], file: path.join(d, n), quick: m[3].toLowerCase() === 'asar' };
     }
   }
   return best;
 }
-ipcMain.handle('app:checkUpdate', () => (app.isPackaged && process.platform === 'win32' ? findUpdate() : null));
+ipcMain.handle('app:checkUpdate', () => { const u = app.isPackaged && process.platform === 'win32' ? findUpdate() : null; if (u) updNotified = u.version; return u; });
 ipcMain.handle('app:installUpdate', (_e, file) => {
   const u = findUpdate();
   if (!u || path.resolve(u.file) !== path.resolve(file)) return { ok: false, error: 'Mise à jour introuvable' };
+  if (u.quick) return installQuickUpdate(u);
   const exeDir = path.dirname(app.getPath('exe'));
   const installDir = path.basename(exeDir).toLowerCase() === 'app' ? path.dirname(exeDir) : exeDir;
   require('child_process').spawn(u.file, ['/S', `/D=${installDir}`], { detached: true, stdio: 'ignore' }).unref();
@@ -678,6 +720,45 @@ ipcMain.handle('app:installUpdate', (_e, file) => {
   return { ok: true };
 });
 
+// Mise à jour rapide : un petit script attend la fermeture d'Arcadia, remplace l'application puis la relance
+function installQuickUpdate(u) {
+  const dst = path.join(process.resourcesPath, 'app.asar');
+  const bat = path.join(app.getPath('temp'), 'arcadia-maj.cmd');
+  fs.writeFileSync(bat, [
+    '@echo off', 'setlocal enabledelayedexpansion', 'set n=0',
+    ':wait', `tasklist /FI "PID eq ${process.pid}" 2>nul | find "${process.pid}" >nul && (timeout /t 1 /nobreak >nul & goto wait)`,
+    ':copy', `copy /Y "${u.file}" "${dst}" >nul 2>&1 || (set /a n+=1 & timeout /t 1 /nobreak >nul & if !n! LSS 30 goto copy)`,
+    `start "" "${app.getPath('exe')}"`, ''
+  ].join('\r\n'));
+  require('child_process').spawn('cmd.exe', ['/c', bat], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+  log?.write('INFO', `mise à jour rapide vers ${u.version}`);
+  setTimeout(() => app.quit(), 300);
+  return { ok: true };
+}
+// Surveille l'arrivée d'une nouvelle version pendant qu'Arcadia est ouvert
+let updNotified = null;
+function watchUpdates() {
+  if (!app.isPackaged || process.platform !== 'win32') return;
+  setInterval(() => {
+    let u = null; try { u = findUpdate(); } catch { /* dossier indisponible */ }
+    if (u && u.version !== updNotified) { updNotified = u.version; win?.webContents.send('app:update', u); }
+  }, 15000);
+}
+// Paramètres → Moteurs : pour chaque console, le moteur utilisé et ce qui lui manque (lecture seule)
+ipcMain.handle('engines:list', () => CONSOLES.map(c => {
+  const g = { id: '', console: c.id };
+  const st = setupFor(g);
+  let engine = null, ready = true, need = null;
+  if (st?.runner) { engine = 'Moteur Arcadia'; const nb = runnerNeedsBios(c.id); if (nb) { ready = false; need = `${BIOS[nb].label} manquant`; } }
+  else if (st && st.exe === arcadiaSwitchExe()) engine = 'Arcadia Switch';
+  else if (st) { engine = (KNOWN_EMULATORS[st.emulator] || {}).name || st.emulator; const err = checkSetup(st); if (err) { ready = false; need = 'pas installé'; } }
+  else { ready = false; need = 'aucun moteur installé'; }
+  if (ready && st && SWITCH_EMUS.includes(st.emulator)) { const n = switchNeeds(st); if (n.keys || n.firmware) { ready = false; need = n.keys ? 'clés (prod.keys) manquantes' : 'firmware manquant'; } }
+  if (ready && st?.emulator === 'vita3k' && !vitaFirmwareOk(st.exe)) { ready = false; need = 'firmware manquant'; }
+  if (ready && st?.emulator === 'rpcs3' && !ps3FirmwareOk(st.exe)) { ready = false; need = 'firmware manquant'; }
+  if (ready && st?.emulator === 'xemu') { const n = xemuNeeds(st.exe); if (n.mcpx || n.bios || n.hdd) { ready = false; need = 'fichiers système manquants'; } }
+  return { id: c.id, name: c.name, engine: engine ? engine.replace(/ \(.*\)$/, '') : null, ready, need };
+}));
 ipcMain.handle('app:openUrl', (_e, url) => { if (/^https:\/\//.test(url)) shell.openExternal(url); });
 
 // ---------------------------------------------------------------- IPC : jeux
@@ -733,24 +814,249 @@ ipcMain.handle('game:moveTo', async (_e, id, consoleId) => {
 
 // Émulateur effectif d'un jeu : réglage du jeu > attribution de la console
 // ---------------------------------------------------------------- moteur intégré (arcadia-runner + cœurs libretro)
+// Cœurs du moteur intégré, par ordre de préférence. « bios » : fichiers de la console à fournir soi-même
+// (dans <données>/system) ; « required » : sans eux, ce cœur ne peut pas démarrer.
+const BIOS = {
+  PS1: { dir: '', test: n => /^(scph.*|ps1_rom)\.bin$/i.test(n), rename: 'ps1_rom.bin', size: [524288], label: 'BIOS PlayStation (scph5502.bin, scph1001.bin…)', optional: true },
+  PS2: { dir: path.join('pcsx2', 'bios'), test: n => /\.(bin|rom0?)$/i.test(n), size: [4194304, 4194304 * 2], label: 'BIOS PlayStation 2 (fichier de 4 Mo)' },
+  DREAMCAST: { dir: 'dc', test: n => /^dc_boot\.bin$/i.test(n), rename: 'dc_boot.bin', size: [2097152], label: 'BIOS Dreamcast (dc_boot.bin)', optional: true }
+};
 const RUNNER_CORES = {
-  PSP: 'ppsspp_libretro', DS: 'melonds_libretro', '3DS': 'azahar_libretro',
-  PS1: 'pcsx_rearmed_libretro', NES: 'mesen_libretro', SNES: 'bsnes_libretro', GBA: 'mgba_libretro', GB: 'mgba_libretro'
+  PSP: ['ppsspp_libretro'], DS: ['melonds_libretro'], '3DS': ['azahar_libretro'],
+  PS1: [{ core: 'swanstation_libretro', bios: 'PS1' }, 'pcsx_rearmed_libretro'], // HD avec ton BIOS, sinon BIOS intégré
+  NES: ['mesen_libretro'], SNES: ['bsnes_libretro'], GBA: ['mgba_libretro'], GB: ['mgba_libretro'],
+  N64: ['mupen64plus_next_libretro'], DREAMCAST: ['flycast_libretro'],
+  GAMECUBE: ['dolphin_libretro'], WII: ['dolphin_libretro'],
+  PS2: [{ core: 'pcsx2_libretro', bios: 'PS2' }]
 };
 function runnerDir() { return app.isPackaged ? path.join(process.resourcesPath, 'runner') : path.join(__dirname, 'runner'); }
+// Dossier système des cœurs : dans les données d'Arcadia (les BIOS survivent aux mises à jour) ;
+// les fichiers livrés avec Arcadia (PPSSPP, Dolphin…) y sont recopiés à chaque nouvelle version.
+let SYS_SYNCED = false;
+function runnerSystem() {
+  const dst = path.join(runnerData(), 'system');
+  if (!SYS_SYNCED) {
+    SYS_SYNCED = true;
+    try {
+      const src = path.join(runnerDir(), 'system'), stamp = path.join(dst, '.arcadia-version'), ver = app.getVersion();
+      let cur = ''; try { cur = fs.readFileSync(stamp, 'utf8'); } catch { /* première fois */ }
+      if (exists(src) && cur !== ver) { fs.mkdirSync(dst, { recursive: true }); fs.cpSync(src, dst, { recursive: true, force: true }); fs.writeFileSync(stamp, ver); }
+    } catch (e) { log?.write('INFO', `dossier système du moteur : ${e.message}`); }
+  }
+  return dst;
+}
+function biosFiles(id) {
+  const b = BIOS[id]; if (!b) return [];
+  try { return fs.readdirSync(path.join(runnerSystem(), b.dir)).filter(n => b.test(n) && b.size.includes(fs.statSync(path.join(runnerSystem(), b.dir, n)).size)); } catch { return []; }
+}
 function runnerFor(consoleId) {
-  const core = RUNNER_CORES[consoleId];
-  if (!core) return null;
+  const list = RUNNER_CORES[consoleId];
+  if (!list) return null;
   const dir = runnerDir();
   const exe = path.join(dir, process.platform === 'win32' ? 'arcadia-runner.exe' : 'arcadia-runner');
-  const lib = path.join(dir, 'cores', core + (process.platform === 'win32' ? '.dll' : '.so'));
-  return exists(exe) && exists(lib) ? { exe, core: lib, system: path.join(dir, 'system') } : null;
+  if (!exists(exe)) return null;
+  for (const c of list) {
+    const core = typeof c === 'string' ? c : c.core, bios = typeof c === 'string' ? null : c.bios;
+    const lib = path.join(dir, 'cores', core + (process.platform === 'win32' ? '.dll' : '.so'));
+    if (!exists(lib)) continue;
+    if (bios && !biosFiles(bios).length) continue;
+    return { exe, core: lib, system: runnerSystem(), coreName: core };
+  }
+  return null;
 }
+// Le cœur existe mais il manque le BIOS obligatoire de la console (ex. PS2)
+function runnerNeedsBios(consoleId) {
+  for (const c of RUNNER_CORES[consoleId] || []) {
+    if (typeof c === 'string' || !c.bios || BIOS[c.bios].optional) continue;
+    if (exists(path.join(runnerDir(), 'cores', c.core + (process.platform === 'win32' ? '.dll' : '.so'))) && !biosFiles(c.bios).length) return c.bios;
+  }
+  return null;
+}
+ipcMain.handle('controls:get', (_e, consoleId) => ({ consoleId, labels: Controls.labels(consoleId), actions: Controls.ACTIONS, ...Controls.read(controlsDir(), consoleId) }));
+ipcMain.handle('controls:set', (_e, consoleId, patch) => {
+  let c = Controls.read(controlsDir(), consoleId);
+  if (patch.reset) { const d = c.device; c = Controls.defaults(consoleId); c.device = d; }
+  if (patch.device && Controls.DEVICES.includes(patch.device)) c.device = patch.device;
+  if (patch.assign) Controls.assign(c, patch.assign.kind, patch.assign.action, patch.assign.code);
+  Controls.write(controlsDir(), consoleId, c);
+  return { consoleId, labels: Controls.labels(consoleId), actions: Controls.ACTIONS, ...c };
+});
+ipcMain.handle('bios:status', () => Object.fromEntries(Object.entries(BIOS).map(([k, b]) => [k, { label: b.label, optional: !!b.optional, files: biosFiles(k) }])));
+// ---------------------------------------------------------------- PS3 : firmware officiel (distribué gratuitement par Sony)
+function rpcs3Exe() {
+  const m = Object.values(store.get('mapping') || {}).find(x => x.emulator === 'rpcs3' && exists(x.exe));
+  if (m) return m.exe;
+  for (const d of [EMU_DIR(), store.get('emulatorsDir')].filter(exists)) { const e = detectEmulators(d).rpcs3; if (e) return e; }
+  return null;
+}
+function ps3FirmwareOk(exe) { return !!exe && exists(path.join(path.dirname(exe), 'dev_flash', 'vsh', 'module', 'vsh.self')); }
+async function ps3FirmwareUrl() {
+  // liste officielle interrogée par les PS3 elles-mêmes : la ligne CDN= donne le fichier PS3UPDAT.PUP actuel
+  for (const region of ['fr', 'eu', 'us']) {
+    try {
+      const r = await net.fetch(`http://fus01.ps3.update.playstation.net/update/ps3/list/${region}/ps3-updatelist.txt`);
+      if (!r.ok) continue;
+      const m = /CDN=(https?:\/\/[^;\s]+PS3UPDAT\.PUP)/i.exec(await r.text());
+      if (m) return m[1];
+    } catch { /* région suivante */ }
+  }
+  return null;
+}
+ipcMain.handle('ps3:firmware', async (_e, mode) => {
+  const exe = rpcs3Exe();
+  if (!exe) return { ok: false, error: 'RPCS3 est introuvable dans le dossier des émulateurs.' };
+  if (ps3FirmwareOk(exe)) return { ok: true, already: true };
+  let pup = null;
+  if (mode === 'pick') {
+    const res = await dialog.showOpenDialog(win, { title: 'Choisis PS3UPDAT.PUP', properties: ['openFile'], filters: [{ name: 'Firmware PS3', extensions: ['pup', 'PUP'] }] });
+    if (res.canceled) return { ok: false, cancelled: true };
+    pup = res.filePaths[0];
+  } else {
+    const url = await ps3FirmwareUrl();
+    if (!url) return { ok: false, manual: true, error: 'Le serveur de Sony n\'a pas répondu.' };
+    pup = path.join(app.getPath('temp'), 'PS3UPDAT.PUP');
+    const send = p => win?.webContents.send('ps3:progress', p);
+    try {
+      const r = await net.fetch(url);
+      if (!r.ok || !r.body) throw new Error('HTTP ' + r.status);
+      const total = Number(r.headers.get('content-length')) || 0;
+      const out = fs.createWriteStream(pup); let got = 0, last = 0;
+      const reader = r.body.getReader();
+      for (;;) {
+        const { done, value } = await reader.read(); if (done) break;
+        out.write(Buffer.from(value)); got += value.length;
+        if (Date.now() - last > 300) { last = Date.now(); send({ got, total }); }
+      }
+      await new Promise(res => out.end(res));
+      send({ got, total: total || got });
+    } catch (e) { return { ok: false, manual: true, error: `Téléchargement impossible (${e.message}).` }; }
+  }
+  // RPCS3 installe le firmware lui-même (petite fenêtre de progression)
+  await new Promise(res => {
+    const ch = require('child_process').spawn(exe, ['--installfw', pup], { cwd: path.dirname(exe), stdio: 'ignore' });
+    ch.on('exit', res); ch.on('error', res);
+  });
+  if (mode !== 'pick') { try { fs.unlinkSync(pup); } catch { /* */ } }
+  return ps3FirmwareOk(exe) ? { ok: true } : { ok: false, error: 'RPCS3 n\'a pas terminé l\'installation. Réessaie, ou installe-le depuis RPCS3 (Fichier → Installer le firmware).' };
+});
+
+// Téléchargement avec progression (fichiers publics des constructeurs : firmware Sony, disque dur vierge de xemu)
+async function downloadTo(url, file, channel) {
+  const send = p => win?.webContents.send(channel, p);
+  const r = await net.fetch(url);
+  if (!r.ok || !r.body) throw new Error('HTTP ' + r.status);
+  const total = Number(r.headers.get('content-length')) || 0;
+  const out = fs.createWriteStream(file); let got = 0, last = 0;
+  const reader = r.body.getReader();
+  for (;;) {
+    const { done, value } = await reader.read(); if (done) break;
+    out.write(Buffer.from(value)); got += value.length;
+    if (Date.now() - last > 300) { last = Date.now(); send({ got, total }); }
+  }
+  await new Promise(res => out.end(res));
+  send({ got, total: total || got });
+}
+// ---------------------------------------------------------------- PS Vita : firmware + polices officiels (serveurs de Sony)
+const VITA_FW = [
+  { name: 'PSVUPDAT.PUP', url: 'http://dus01.psv.update.playstation.net/update/psv/image/2022_0209/rel_f2c7b12fe85496ec88a0391b514d6e3b/PSVUPDAT.PUP' },
+  { name: 'PSP2UPDAT.PUP', url: 'http://dus01.psp2.update.playstation.net/update/psp2/image/2022_0209/sd_59dcf059d3328fb67be7e51f8aa33418/PSP2UPDAT.PUP' }
+];
+function vitaExe() {
+  const m = Object.values(store.get('mapping') || {}).find(x => x.emulator === 'vita3k' && exists(x.exe));
+  if (m) return m.exe;
+  for (const d of [EMU_DIR(), store.get('emulatorsDir')].filter(exists)) { const e = detectEmulators(d).vita3k; if (e) return e; }
+  return null;
+}
+function vitaFirmwareOk(exe) {
+  if (!exe) return false;
+  return [path.dirname(exe), path.join(app.getPath('appData'), 'Vita3K', 'Vita3K')].some(d => exists(path.join(d, 'os0')) && exists(path.join(d, 'vs0')));
+}
+ipcMain.handle('vita:firmware', async (_e, mode) => {
+  const exe = vitaExe();
+  if (!exe) return { ok: false, error: 'Vita3K est introuvable dans le dossier des émulateurs.' };
+  let files = [];
+  if (mode === 'pick') {
+    const res = await dialog.showOpenDialog(win, { title: 'Choisis PSVUPDAT.PUP (et PSP2UPDAT.PUP)', properties: ['openFile', 'multiSelections'], filters: [{ name: 'Firmware PS Vita', extensions: ['pup', 'PUP'] }] });
+    if (res.canceled) return { ok: false, cancelled: true };
+    files = res.filePaths;
+  } else {
+    try {
+      // adresse actuelle du firmware donnée par la liste de mises à jour de Sony (repli : 3.74 connu)
+      let sys = VITA_FW[0].url;
+      try { const t = await (await net.fetch('http://fus01.psv.update.playstation.net/update/psv/list/eu/psv-updatelist.xml')).text(); const m = /https?:[^"<\s]+PSVUPDAT\.PUP/i.exec(t); if (m) sys = m[0]; } catch { /* liste injoignable */ }
+      for (const f of [{ ...VITA_FW[0], url: sys }, VITA_FW[1]]) { const dst = path.join(app.getPath('temp'), f.name); await downloadTo(f.url, dst, 'vita:progress'); files.push(dst); }
+    } catch (e) { return { ok: false, manual: true, error: `Téléchargement impossible (${e.message}).` }; }
+  }
+  for (const f of files) { // Vita3K installe lui-même chaque paquet
+    await new Promise(res => { const ch = require('child_process').spawn(exe, ['--firmware', f], { cwd: path.dirname(exe), stdio: 'ignore' }); ch.on('exit', res); ch.on('error', res); });
+  }
+  if (mode !== 'pick') for (const f of files) { try { fs.unlinkSync(f); } catch { /* */ } }
+  return vitaFirmwareOk(exe) ? { ok: true } : { ok: false, error: 'Vita3K n\'a pas terminé l\'installation. Réessaie, ou installe-le depuis Vita3K (Fichier → Installer le firmware).' };
+});
+// ---------------------------------------------------------------- Xbox (xemu) : BIOS + MCPX (de la console du joueur) + disque dur vierge (fourni par xemu)
+const XEMU_HDD = 'https://github.com/xemu-project/xemu-hdd-image/releases/latest/download/xbox_hdd.qcow2.zip';
+function xemuToml(exe) {
+  const local = path.join(path.dirname(exe), 'xemu.toml');
+  return exists(local) ? local : path.join(app.getPath('appData'), 'xemu', 'xemu', 'xemu.toml');
+}
+function xemuNeeds(exe) {
+  let t = ''; try { t = fs.readFileSync(xemuToml(exe), 'utf8'); } catch { /* jamais lancé */ }
+  const get = k => { const m = new RegExp(`^\\s*${k}\\s*=\\s*['"](.*)['"]`, 'm').exec(t); return m ? m[1].replace(/\\\\/g, '\\') : ''; };
+  return { mcpx: !exists(get('bootrom_path')), bios: !exists(get('flashrom_path')), hdd: !exists(get('hdd_path')) };
+}
+ipcMain.handle('xbox:install', async (_e, what) => {
+  const exe = Object.values(store.get('mapping') || {}).find(x => x.emulator === 'xemu' && exists(x.exe))?.exe
+    || [EMU_DIR(), store.get('emulatorsDir')].filter(exists).map(d => detectEmulators(d).xemu).find(Boolean);
+  if (!exe) return { ok: false, error: 'xemu est introuvable dans le dossier des émulateurs.' };
+  const dir = path.join(path.dirname(exe), 'arcadia-system'); fs.mkdirSync(dir, { recursive: true });
+  const { tomlSet } = require('./src/configfiles');
+  const setKey = (key, file) => { const f = xemuToml(exe); let t = ''; try { t = fs.readFileSync(f, 'utf8'); } catch { /* */ } fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, tomlSet(t, 'sys.files', key, file)); };
+  if (what === 'hdd') {
+    const zip = path.join(app.getPath('temp'), 'xbox_hdd.qcow2.zip');
+    try { await downloadTo(XEMU_HDD, zip, 'xbox:progress'); } catch (e) { return { ok: false, error: `Téléchargement impossible (${e.message}).` }; }
+    try { for (const z of require('./src/ziplite').readZip(zip)) if (/\.qcow2$/i.test(z.name)) fs.writeFileSync(path.join(dir, 'xbox_hdd.qcow2'), z.data()); } catch (e) { return { ok: false, error: `Décompression impossible (${e.message}).` }; }
+    try { fs.unlinkSync(zip); } catch { /* */ }
+    const hdd = path.join(dir, 'xbox_hdd.qcow2'); if (!exists(hdd)) return { ok: false, error: 'Disque dur introuvable dans l\'archive.' };
+    setKey('hdd_path', hdd);
+    return { ok: true, message: 'Disque dur Xbox installé', need: xemuNeeds(exe) };
+  }
+  const spec = { mcpx: { title: 'Choisis ta ROM MCPX (512 octets)', sizes: [512], key: 'bootrom_path', name: 'mcpx_1.0.bin' },
+                 bios: { title: 'Choisis ton BIOS Xbox (256 Ko ou 1 Mo)', sizes: [262144, 1048576], key: 'flashrom_path', name: 'bios.bin' } }[what];
+  if (!spec) return { ok: false, error: 'Fichier inconnu' };
+  const res = await dialog.showOpenDialog(win, { title: spec.title, properties: ['openFile'], filters: [{ name: 'ROM', extensions: ['bin', 'rom'] }, { name: 'Tous les fichiers', extensions: ['*'] }] });
+  if (res.canceled) return { ok: false, cancelled: true };
+  const src = res.filePaths[0];
+  if (!spec.sizes.includes(fs.statSync(src).size)) return { ok: false, error: `Ce fichier n'a pas la bonne taille pour un ${what === 'mcpx' ? 'MCPX' : 'BIOS Xbox'}.` };
+  const dst = path.join(dir, spec.name); fs.copyFileSync(src, dst); setKey(spec.key, dst);
+  return { ok: true, message: (what === 'mcpx' ? 'MCPX' : 'BIOS Xbox') + ' installé', need: xemuNeeds(exe) };
+});
+
+// Installe le BIOS que l'utilisateur a extrait de SA console (copie dans le dossier système du moteur)
+ipcMain.handle('bios:install', async (_e, id) => {
+  const b = BIOS[id]; if (!b) return { ok: false, error: 'Console inconnue' };
+  const res = await dialog.showOpenDialog(win, { title: `Choisis ton ${b.label}`, properties: ['openFile', 'multiSelections'], filters: [{ name: 'BIOS', extensions: ['bin', 'rom', 'rom0'] }, { name: 'Tous les fichiers', extensions: ['*'] }] });
+  if (res.canceled) return { ok: false, cancelled: true };
+  const dst = path.join(runnerSystem(), b.dir); fs.mkdirSync(dst, { recursive: true });
+  let n = 0; const bad = [];
+  for (const f of res.filePaths) {
+    let name = path.basename(f); const size = fs.statSync(f).size;
+    if (!b.size.includes(size) || !/\.(bin|rom0?)$/i.test(name)) { bad.push(name); continue; }
+    if (!b.test(name)) { if (!b.rename) { bad.push(name); continue; } name = b.rename; } // le cœur cherche un nom précis
+    fs.copyFileSync(f, path.join(dst, name)); n++;
+    // SwanStation (PS1 HD) ne lit que scph5500/5501/5502.bin ou ps1_rom.bin : copie sous un nom qu'il connaît
+    if (id === 'PS1' && !SWAN_ANY.includes(name.toLowerCase()) && !exists(path.join(dst, 'ps1_rom.bin'))) { try { fs.copyFileSync(f, path.join(dst, 'ps1_rom.bin')); } catch { /* */ } }
+  }
+  if (!n) return { ok: false, error: `Ce fichier ne ressemble pas à un ${b.label}${bad.length ? ` (${bad.join(', ')})` : ''}.` };
+  return { ok: true, message: `${n} fichier(s) BIOS installé(s).`, state: snapshot() };
+});
 function runnerData() {
   const emu = EMU_DIR();
   return emu ? path.join(emu, 'Arcadia') : path.join(app.getPath('userData'), 'runner');
 }
 // ---------------------------------------------------------------- Manettes (calibrage partagé par tous les moteurs)
+// Contrôles par console (périphérique + touches réattribuées), partagés par tous les moteurs Arcadia
+function controlsDir() { return path.join(runnerData(), 'controls'); }
+function controlsFile(consoleId) { try { return Controls.ensure(controlsDir(), consoleId); } catch { return ''; } }
 function padDbPath() { return path.join(runnerData(), 'gamecontrollerdb.txt'); }
 function padDbLines() { try { return fs.readFileSync(padDbPath(), 'utf8').split(/\r?\n/).filter(l => /^[0-9a-f]{32},/i.test(l)); } catch { return []; } }
 function padDbUpsert(mapping) {
@@ -818,10 +1124,12 @@ function runnerPaths(g) {
 function launchRunner(setup, g, title, onExit, extra = []) {
   const p = runnerPaths(g);
   const args = ['--core', setup.core, '--game', g.path, '--title', title, '--console', g.console, '--key', runnerKey(g),
-    '--data', p.data, '--system', setup.system, '--saves', p.saves, '--states', p.states, '--shots', p.shots, '--config', p.config, ...padRunnerArgs(), ...extra];
+    '--data', p.data, '--system', setup.system, '--saves', p.saves, '--states', p.states, '--shots', p.shots, '--config', p.config, ...padRunnerArgs(),
+    ...(controlsFile(g.console) ? ['--controls', controlsFile(g.console)] : []), ...extra];
   const start = Date.now();
   let seconds = null, error = null, buf = '';
-  const child = require('child_process').spawn(setup.exe, args, { cwd: path.dirname(setup.exe), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: false });
+  const accentHex = /^#[0-9a-f]{6}$/i.test(UI_ACCENT.c || '') ? UI_ACCENT.c : '#39e5c8';
+  const child = require('child_process').spawn(setup.exe, args, { cwd: path.dirname(setup.exe), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: false, env: { ...padEnv(), ARCADIA_ACCENT: accentHex, ARCADIA_STATS: statsFile() } });
   child.stdout.on('data', d => {
     buf += d.toString('utf8');
     let i;
@@ -852,7 +1160,9 @@ function setupFor(g, external) {
   const base = (store.get('mapping') || {})[g.console];
   const gs = (store.get('gameSettings') || {})[g.id] || {};
   const rn = runnerFor(g.console);
-  if (rn && !external && (gs.emulator === 'arcadia' || (!gs.emulator && settings().useRunner !== false))) return { emulator: 'arcadia', runner: true, ...rn };
+  // une console, un moteur : le moteur Arcadia, sauf s'il a planté sur ce jeu avec cette version (secours automatique)
+  const fellBack = gs.fallback === app.getVersion();
+  if (rn && !external && !fellBack && settings().useRunner !== false) return { emulator: 'arcadia', runner: true, ...rn };
   let setup = base ? { ...base } : null;
   if (gs.emulator && gs.emulator !== (base && base.emulator)) {
     const e = KNOWN_EMULATORS[gs.emulator];
@@ -861,6 +1171,8 @@ function setupFor(g, external) {
       || dirs.map(d => detectEmulators(d)[gs.emulator]).find(Boolean);
     if (e && exe) setup = { emulator: gs.emulator, exe, args: (e.argsByConsole || {})[g.console] || e.args };
   }
+  // Switch sans émulateur installé : le moteur Switch d'Arcadia, fourni avec Arcadia
+  if (!setup && (g.console === 'SWITCH' || g.console === 'SWITCH 2') && arcadiaSwitchExe()) setup = { emulator: 'edencli', exe: arcadiaSwitchExe(), args: KNOWN_EMULATORS.edencli.args };
   if (setup && gs.extraArgs) setup.args = `${gs.extraArgs} ${setup.args}`;
   return setup;
 }
@@ -901,6 +1213,11 @@ function backupFor(g, force) {
 
 // ---------------------------------------------------------------- Switch : clés et firmware
 const SWITCH_EMUS = ['eden', 'lichii', 'edencli'];
+// Moteur Switch d'Arcadia (Eden recompilé : manette + clavier lus par Arcadia, vibrations, nom et icône Arcadia)
+function arcadiaSwitchExe() {
+  const e = path.join(runnerDir(), 'switch', process.platform === 'win32' ? 'arcadia-switch.exe' : 'arcadia-switch');
+  return exists(e) ? e : null;
+}
 // Dossier de données d'un émulateur Switch (portable « user » à côté de l'exe, sinon AppData)
 function switchDataDir(exe, id) {
   const portable = path.join(path.dirname(exe), 'user');
@@ -920,9 +1237,97 @@ function switchTargets() {
   const all = Object.assign({}, ...[EMU_DIR(), store.get('emulatorsDir')].filter(exists).map(d => detectEmulators(d)));
   for (const m of Object.values(store.get('mapping') || {})) if (SWITCH_EMUS.includes(m.emulator) && exists(m.exe)) all[m.emulator] = m.exe;
   for (const id of SWITCH_EMUS) if (all[id]) dirs.add(switchDataDir(all[id], id));
+  if (arcadiaSwitchExe()) dirs.add(switchDataDir(arcadiaSwitchExe(), 'edencli')); // moteur Switch d'Arcadia
   for (const d of [EMU_DIR(), store.get('emulatorsDir')].filter(exists)) { const e = path.join(d, 'Eden', 'user'); if (exists(path.dirname(e))) dirs.add(e); } // Eden à venir
   return [...dirs];
 }
+// ---------------------------------------------------------------- Fonds d'écran (recherche Wallhaven, images publiques)
+const WALL_RES = ['1280x720', '1920x1080', '2560x1440', '3840x2160'];
+// Fonds d'écran : Wallhaven (fonds d'écran, tout public) + Openverse (images libres, contenu adulte exclu, GIF compris)
+async function wallhavenSearch(q, res, page) {
+  const u = new URL('https://wallhaven.cc/api/v1/search');
+  // contenu tout public seulement : images « SFW », sans la catégorie « personnes », mots-clés suggestifs exclus
+  const NOT = ['sexy', 'ecchi', 'lingerie', 'bikini', 'swimwear', 'underwear', 'cleavage', 'nude', 'ass', 'boobs', 'panties', 'stockings', 'thighs', 'feet', 'pantyhose', 'erotic', 'big boobs', 'women'].map(t => '-' + (t.includes(' ') ? `"${t}"` : t)).join(' ');
+  u.searchParams.set('q', `${String(q || '').slice(0, 120)} ${NOT}`.trim()); u.searchParams.set('purity', '100'); u.searchParams.set('categories', '110');
+  u.searchParams.set('sorting', q ? 'relevance' : 'toplist'); u.searchParams.set('topRange', '1y'); u.searchParams.set('page', String(page));
+  if (res[0]) u.searchParams.set('atleast', res[0]);
+  u.searchParams.set('ratios', '16x9,16x10,21x9,32x9');
+  const r = await net.fetch(u.toString(), { headers: { 'User-Agent': 'Arcadia' } });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const j = await r.json();
+  return { last: j.meta?.last_page || page, items: (j.data || []).map(w => ({ id: 'wh-' + w.id, full: w.path, thumb: w.thumbs?.large || w.thumbs?.original, res: w.resolution, type: (w.file_type || '').replace('image/', ''), size: w.file_size })) };
+}
+async function openverseSearch(q, res, types, page) {
+  const u = new URL('https://api.openverse.org/v1/images/');
+  u.searchParams.set('q', String(q || '').trim().slice(0, 120) || 'landscape wallpaper');
+  u.searchParams.set('page', String(page)); u.searchParams.set('page_size', '20');
+  u.searchParams.set('aspect_ratio', 'wide'); u.searchParams.set('size', 'large'); u.searchParams.set('mature', 'false');
+  const ext = (types || []).map(t => (t === 'jpeg' ? 'jpg' : t)).filter(t => ['jpg', 'png', 'gif', 'webp'].includes(t));
+  u.searchParams.set('extension', (ext.length ? ext : ['jpg', 'png', 'gif', 'webp']).join(','));
+  const r = await net.fetch(u.toString(), { headers: { 'User-Agent': 'Arcadia' } });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const j = await r.json();
+  const minW = res[0] ? parseInt(res[0], 10) : 0;
+  return { last: Math.min(j.page_count || page, 20), items: (j.results || []).filter(x => !x.mature && (x.width || 0) >= minW).map(x => ({
+    id: 'ov-' + x.id, full: x.url, thumb: x.thumbnail || x.url, res: x.width && x.height ? `${x.width}x${x.height}` : '', type: String(x.filetype || path.extname(new URL(x.url).pathname).slice(1) || 'jpg').toLowerCase(), size: x.filesize || 0 })) };
+}
+ipcMain.handle('wall:search', async (_e, { q, res = [], types = [], page = 1 }) => {
+  const r0 = (res || []).filter(x => WALL_RES.includes(x)).sort((a, b) => parseInt(a, 10) - parseInt(b, 10)); // « au moins » la plus petite choisie
+  const onlyGif = types && types.length && types.every(t => t === 'gif'); // Wallhaven n'a presque pas de GIF
+  const [a, b] = await Promise.allSettled([onlyGif ? Promise.resolve({ last: 0, items: [] }) : wallhavenSearch(q, r0, page), openverseSearch(q, r0, types, page)]);
+  const A = a.status === 'fulfilled' ? a.value : { last: 0, items: [] }, B = b.status === 'fulfilled' ? b.value : { last: 0, items: [] };
+  if (a.status === 'rejected' && b.status === 'rejected') return { ok: false, error: `Recherche impossible (${a.reason?.message || b.reason?.message})` };
+  const items = []; // en alternance : fonds d'écran et images libres
+  for (let i = 0; i < Math.max(A.items.length, B.items.length); i++) { if (A.items[i]) items.push(A.items[i]); if (B.items[i]) items.push(B.items[i]); }
+  return { ok: true, page, last: Math.max(A.last, B.last, page), items };
+});
+function wallName(url) { // nom de fichier sûr, avec son extension d'image
+  let n = decodeURIComponent(path.basename(new URL(url).pathname) || 'image').replace(/[^\w.\-]+/g, '_').slice(-80);
+  if (!/\.(jpe?g|png|gif|webp)$/i.test(n)) n += '.jpg';
+  return crypto.createHash('sha1').update(url).digest('hex').slice(0, 8) + '-' + n;
+}
+function wallDir() { const d = path.join(MEDIA(), 'backgrounds'); fs.mkdirSync(d, { recursive: true }); return d; }
+async function fetchFile(url, file) {
+  if (!/^https:\/\//.test(url)) throw new Error('adresse refusée');
+  const r = await net.fetch(url, { headers: { 'User-Agent': 'Arcadia' } }); if (!r.ok) throw new Error('HTTP ' + r.status);
+  if (!/^image\//.test(r.headers.get('content-type') || '')) throw new Error('ce n\'est pas une image');
+  fs.writeFileSync(file, Buffer.from(await r.arrayBuffer()));
+}
+ipcMain.handle('wall:install', async (_e, url) => {
+  try {
+    const f = path.join(wallDir(), wallName(url)); if (!exists(f)) await fetchFile(url, f);
+    store.data.settings = { ...settings(), bgMode: 'custom', bgImage: f }; store.save();
+    return { ok: true, state: snapshot() };
+  } catch (e) { return { ok: false, error: `Installation impossible (${e.message})` }; }
+});
+ipcMain.handle('wall:local', async () => { // image de l'ordinateur
+  const r = await dialog.showOpenDialog(win, { title: 'Choisis une image', properties: ['openFile'], filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp'] }] });
+  if (r.canceled) return { ok: false, cancelled: true };
+  const f = path.join(wallDir(), 'perso-' + Date.now() + path.extname(r.filePaths[0])); fs.copyFileSync(r.filePaths[0], f);
+  store.data.settings = { ...settings(), bgMode: 'custom', bgImage: f }; store.save();
+  return { ok: true, state: snapshot() };
+});
+ipcMain.handle('wall:download', async (_e, url) => {
+  const name = wallName(url);
+  const r = await dialog.showSaveDialog(win, { title: 'Enregistrer le fond d\'écran', defaultPath: path.join(app.getPath('pictures'), name) });
+  if (r.canceled || !r.filePath) return { ok: false, cancelled: true };
+  try { await fetchFile(url, r.filePath); return { ok: true, file: r.filePath }; } catch (e) { return { ok: false, error: e.message }; }
+});
+ipcMain.handle('ui:windowsAccent', () => { try { return '#' + systemPreferences.getAccentColor().slice(0, 6); } catch { return null; } });
+// Transparence : matériau acrylique de Windows 11 derrière l'interface
+function applyWindowMaterial() {
+  if (!win || process.platform !== 'win32') return;
+  try { win.setBackgroundMaterial(settings().bgMode === 'transparent' ? 'acrylic' : 'none'); } catch { /* Windows 10 */ }
+}
+ipcMain.handle('ui:material', () => applyWindowMaterial());
+
+// Au démarrage : des jeux Switch mais pas de clés / firmware → Arcadia le signale une fois
+ipcMain.handle('switch:need', () => {
+  const g = games.find(isSwitch); if (!g) return null;
+  const setup = setupFor(g); if (!setup || !SWITCH_EMUS.includes(setup.emulator)) return null;
+  const n = switchNeeds(setup);
+  return n.keys || n.firmware ? { keys: n.keys, firmware: n.firmware } : null;
+});
 ipcMain.handle('switch:install', async (_e, what) => {
   const targets = switchTargets();
   if (!targets.length) return { ok: false, error: 'Aucun émulateur Switch installé.' };
@@ -967,18 +1372,23 @@ ipcMain.handle('switch:install', async (_e, what) => {
 // ---------------------------------------------------------------- menu Arcadia par-dessus un émulateur externe
 // Échap, Guide ou Back+Start bref : le jeu est mis en pause (processus suspendu) et le menu Arcadia s'affiche.
 const OV = { win: null, game: null, open: false, relaunch: null };
+const UI_ACCENT = { c: null, on: null }; // couleur des boutons d'Arcadia, reprise par le menu Échap
+ipcMain.on('ui:accent', (_e, c, on) => { UI_ACCENT.c = typeof c === 'string' && /^#[0-9a-f]{6}$|^rgb/i.test(c) ? c : null; UI_ACCENT.on = typeof on === 'string' ? on : null; });
 // Réglages proposés dans le menu Arcadia des moteurs Switch (appliqués au prochain lancement du jeu)
 const SW_OPTS = [
-  { sec: 'image', key: 'Renderer/resolution_setup', label: 'Résolution', values: [['1', '0,5x · 540p'], ['3', '1x · 1080p'], ['5', '1,5x · 1620p'], ['6', '2x · 4K'], ['7', '3x · 6K']], def: '3' },
-  { sec: 'image', key: 'System/use_docked_mode', label: 'Mode de la console', values: [['1', 'TV · meilleure image'], ['0', 'Portable · plus léger']], def: '1' },
-  { sec: 'image', key: 'Renderer/frame_gen', label: 'Génération d\'images', values: [['false', 'Désactivée'], ['true', '×2 · plus fluide']], def: 'false', hint: 'Double les images affichées par seconde. Peut ajouter un peu de latence.' },
-  { sec: 'image', key: 'Renderer/use_vsync', label: 'Synchronisation verticale', values: [['2', 'Activée'], ['1', 'Mailbox · faible latence'], ['0', 'Désactivée']], def: '2' },
-  { sec: 'image', key: 'Renderer/anti_aliasing', label: 'Anticrénelage', values: [['0', 'Aucun'], ['1', 'FXAA'], ['2', 'SMAA']], def: '1' },
-  { sec: 'image', key: 'Renderer/scaling_filter', label: 'Filtre d\'agrandissement', values: [['1', 'Bilinéaire'], ['5', 'ScaleForce'], ['6', 'AMD FSR']], def: '6' },
-  { sec: 'image', key: 'Renderer/aspect_ratio', label: 'Format', values: [['0', '16:9'], ['4', 'Étirer à l\'écran']], def: '0' },
-  { sec: 'son', key: 'Audio/volume', label: 'Volume', values: [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map(v => [String(v), v + ' %']), def: '100' },
-  { sec: 'son', key: 'Audio/audio_muted', label: 'Couper le son', values: [['false', 'Non'], ['true', 'Oui']], def: 'false' },
+  { sec: 'image', key: 'Renderer/resolution_setup', hint: 'S\'applique en relançant le jeu.', label: 'Résolution', values: [['1', '0,5x · 540p'], ['3', '1x · 1080p'], ['5', '1,5x · 1620p'], ['6', '2x · 4K'], ['7', '3x · 6K']], def: '3' },
+  { sec: 'image', key: 'System/use_docked_mode', hint: 'S\'applique en relançant le jeu.', label: 'Mode de la console', values: [['1', 'TV · meilleure image'], ['0', 'Portable · plus léger']], def: '1' },
+  { sec: 'image', key: 'Arcadia/hud', label: 'Compteur d\'images/s', values: [['false', 'Masqué'], ['true', 'Affiché']], def: 'false', hint: 'Position et taille : Paramètres → Interface.' },
+  { sec: 'image', key: 'Arcadia/fps60', label: '60 images/s (patch du jeu)', values: [['on', 'Activé si disponible'], ['off', 'Désactivé']], def: 'on', hint: 'Vrais 60 images/s, sans taches : patch communautaire (base NX-60FPS) installé tout seul s\'il existe pour ce jeu et cette version.' },
+  { sec: 'image', key: 'Renderer/nvidia_dlss', label: 'DLSS NVIDIA (jeux Switch 2)', values: [['false', 'Désactivé'], ['true', 'Activé · RTX']], def: 'false', hint: 'Remplace l\'agrandissement intégré des jeux Switch 2 par le vrai DLSS de ta carte NVIDIA RTX : plus net, plus fluide.' },
+  { sec: 'image', key: 'Renderer/use_vsync', hint: 'S\'applique en relançant le jeu.', label: 'Synchronisation verticale', values: [['2', 'Activée'], ['1', 'Mailbox · faible latence'], ['0', 'Désactivée']], def: '2' },
+  { sec: 'image', key: 'Renderer/anti_aliasing', live: true, hint: 'S\'applique tout de suite.', label: 'Anticrénelage', values: [['0', 'Aucun'], ['1', 'FXAA'], ['2', 'SMAA']], def: '1' },
+  { sec: 'image', key: 'Renderer/scaling_filter', live: true, hint: 'S\'applique tout de suite.', label: 'Filtre d\'agrandissement', values: [['1', 'Bilinéaire'], ['5', 'ScaleForce'], ['6', 'AMD FSR']], def: '6' },
+  { sec: 'image', key: 'Renderer/aspect_ratio', live: true, hint: 'S\'applique tout de suite.', label: 'Format', values: [['0', '16:9'], ['4', 'Étirer à l\'écran']], def: '0' },
+  { sec: 'son', key: 'Audio/volume', live: true, hint: 'S\'applique tout de suite.', label: 'Volume', values: [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map(v => [String(v), v + ' %']), def: '100' },
+  { sec: 'son', key: 'Audio/audio_muted', live: true, hint: 'S\'applique tout de suite.', label: 'Couper le son', values: [['false', 'Non'], ['true', 'Oui']], def: 'false' },
   { sec: 'manette', key: 'Arcadia/control', label: 'Jouer avec', values: [['pad', 'Ma manette'], ['keyboard', 'Le clavier']], def: 'pad', hint: 'Le moteur Switch n\'accepte qu\'une commande par touche : manette OU clavier.' },
+  { sec: 'manette', key: 'Arcadia/mouse', label: 'Souris (avec le clavier)', values: [['camera', 'Caméra + clics (ZR · ZL)'], ['off', 'Désactivée']], def: 'camera', hint: 'Bouger la souris tourne la caméra (stick droit). S\'applique en relançant le jeu.' },
   { sec: 'manette', key: 'Controls/vibration_enabled', label: 'Vibrations', values: [['true', 'Activées'], ['false', 'Désactivées']], def: 'true' }
 ];
 // Langue retenue pour un jeu : choix du joueur, sinon le français s'il est dans la ROM
@@ -986,18 +1396,224 @@ function gameLang(g) {
   const gs = (store.get('gameSettings') || {})[g.id] || {};
   return Langs.pick(gs.lang || null, decorate(g).langs);
 }
+// Images intermédiaires : choix Arcadia → réglages du moteur (frame_gen + type : 1 Optical Flow, 2 DLSS Frame Generation)
+function frameGenChoice(o) { return o['Arcadia/frame_gen'] || (o['Renderer/frame_gen'] === 'true' ? 'of' : 'off'); }
+function swEngineOpts(id) {
+  const o = { ...extOpts(id) };
+  let fg = 'off'; // images intermédiaires retirées : taches visibles même en DLSS sur des jeux émulés à 30 images/s
+  delete o['Arcadia/frame_gen'];
+  if (o['Renderer/nvidia_dlss'] === 'true' && !streamlineReady()) { installStreamline().catch(() => {}); o['Renderer/nvidia_dlss'] = 'false'; }
+  if (fg === 'dlss' && !streamlineReady()) { // fichiers NVIDIA pas encore là : on les télécharge, sans images intermédiaires cette fois
+    log?.write('INFO', 'DLSS Frame Generation : fichiers NVIDIA absents, téléchargement en arrière-plan');
+    installStreamline().catch(() => {});
+    fg = 'off';
+  }
+  o['Renderer/frame_gen'] = fg === 'off' ? 'false' : 'true';
+  o['Renderer/frame_gen_type'] = fg === 'dlss' ? '2' : '1';
+  return o;
+}
+// NVIDIA Streamline (DLSS Frame Generation) : SDK officiel de NVIDIA sur GitHub, extrait dans <dossier Switch>/streamline
+const STREAMLINE_ZIP = 'https://github.com/NVIDIA-RTX/Streamline/releases/download/v2.14.16/streamline-sdk-v2.14.16.zip';
+const STREAMLINE_FILES = ['sl.interposer.dll', 'sl.common.dll', 'sl.dlss.dll', 'sl.dlss_g.dll', 'sl.reflex.dll', 'sl.pcl.dll', 'nvngx_dlssg.dll', 'NvLowLatencyVk.dll'];
+function streamlineReady() {
+  const dir = arcadiaSwitchExe() && switchDataDir(arcadiaSwitchExe(), 'edencli');
+  return !!dir && STREAMLINE_FILES.every(f => exists(path.join(dir, 'streamline', f)));
+}
+let streamlineJob = null;
+function installStreamline() {
+  if (streamlineJob) return streamlineJob;
+  streamlineJob = (async () => {
+    const tmp = path.join(app.getPath('temp'), 'arcadia-streamline.zip');
+    try {
+      await downloadTo(STREAMLINE_ZIP, tmp, 'dlss:progress');
+      const want = new Set([...STREAMLINE_FILES, 'nvngx_dlss.dll', 'nvngx_dlss.license.txt', 'reflex.license.txt'].map(n => n.toLowerCase()));
+      const entries = require('./src/ziplite').readZip(tmp).filter(z => /^bin\/x64\/[^/]+$/i.test(z.name) && want.has(path.basename(z.name).toLowerCase()));
+      if (!entries.some(z => /sl\.dlss_g\.dll$/i.test(z.name))) throw new Error('archive NVIDIA inattendue');
+      for (const d of switchTargets()) {
+        const out = path.join(d, 'streamline'); fs.mkdirSync(out, { recursive: true });
+        for (const z of entries) fs.writeFileSync(path.join(out, path.basename(z.name)), z.data());
+      }
+      log?.write('INFO', `DLSS Frame Generation : ${entries.length} fichiers NVIDIA installés`);
+      win?.webContents.send('dlss:progress', { done: true });
+      return true;
+    } catch (e) {
+      log?.write('ERREUR', `DLSS Frame Generation : ${e.message}`);
+      win?.webContents.send('dlss:progress', { error: e.message });
+      return false;
+    } finally { try { fs.unlinkSync(tmp); } catch { /* déjà parti */ } streamlineJob = null; }
+  })();
+  return streamlineJob;
+}
+// Patchs 60 images/s : base communautaire NX-60FPS-RES-GFX-Cheats (titles/<id du jeu>/cheats/<build id>.txt).
+// Seules les lignes « 60 FPS » sont gardées, posées comme une modification du jeu dans le dossier du moteur.
+const FPS60_RAW = 'https://raw.githubusercontent.com/ChanseyIsTheBest/NX-60FPS-RES-GFX-Cheats/main/titles';
+function engineBuildId(userDir) { // build id du programme principal, lu dans le journal du moteur
+  try { const m = /build_id=([0-9A-F]{16,64}), name=main/i.exec(fs.readFileSync(path.join(userDir, 'log', 'eden_log.txt'), 'utf8')); return m ? m[1].slice(0, 16).toUpperCase() : null; } catch { return null; }
+}
+function only60fps(txt) { // garde les sections [..60 FPS..] (et leurs lignes), sans les variantes 30/45 ni la résolution
+  const out = []; let keep = false, any = false;
+  for (const line of String(txt).split(/\r?\n/)) {
+    const h = /^\s*[\[{](.*)[\]}]\s*$/.exec(line);
+    if (h) keep = /^\s*\{/.test(line) || (/60\s*fps|fps\s*60|unlock/i.test(h[1]) && !/30|45|dynamic res|resolution/i.test(h[1])); // {code maître} : toujours gardé
+    if (h && keep && !/^\s*\{/.test(line)) any = true;
+    if (keep) out.push(line);
+  }
+  return any ? out.join('\n').trim() : '';
+}
+// Tous les patchs 60 images/s connus pour ce jeu (une version = un fichier) : le moteur prend celui de la version installée
+async function applyFps60(g, on) {
+  const tid = String(decorate(g).titleId || titleIdFrom(g.file) || '').toUpperCase();
+  if (!/^0[0-9A-F]{15}$/.test(tid)) return { ok: false, why: 'identifiant du jeu inconnu' };
+  const dirs = switchTargets().map(d => path.join(d, 'load', tid, 'Arcadia 60 FPS', 'cheats'));
+  if (!on) { for (const d of dirs) { try { for (const f of fs.readdirSync(d)) fs.writeFileSync(path.join(d, f), ''); } catch { /* rien d'installé */ } } return { ok: true, off: true }; }
+  const r = await net.fetch(`https://api.github.com/repos/ChanseyIsTheBest/NX-60FPS-RES-GFX-Cheats/contents/titles/${tid}/cheats`, { headers: { 'User-Agent': 'Arcadia', Accept: 'application/vnd.github+json' } });
+  if (r.status === 404) return { ok: false, none: true, why: 'aucun patch 60 images/s pour ce jeu' };
+  if (!r.ok) return { ok: false, why: 'HTTP ' + r.status };
+  const list = (await r.json()).filter(f => /^[0-9A-F]{16}\.txt$/i.test(f.name));
+  let n = 0;
+  for (const f of list) {
+    const t = await net.fetch(`${FPS60_RAW}/${tid}/cheats/${f.name}`); if (!t.ok) continue;
+    const keep = only60fps(await t.text()); if (!keep) continue;
+    for (const d of dirs) { fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, f.name.toUpperCase()), keep + '\n'); }
+    n++;
+  }
+  if (!n) return { ok: false, none: true, why: 'aucun patch 60 images/s pour ce jeu' };
+  log?.write('INFO', `60 images/s : ${n} version(s) de ${decorate(g).title} couvertes`);
+  return { ok: true, n };
+}
+// ---- PSP et PS1 (moteur Arcadia) : bases de codes publiques, gardées en cache dans le dossier du moteur
+const patchesDir = () => path.join(runnerData(), 'patches');
+const fps60On = g => settings().fps60Auto !== false && (extOpts(g.id)['Arcadia/fps60'] || 'on') === 'on';
+let pspDbCache = null;
+function pspDb() {
+  if (pspDbCache) return pspDbCache;
+  try { pspDbCache = Patches.parsePspDb(fs.readFileSync(path.join(patchesDir(), 'psp-cheat.db'), 'utf8')); } catch { pspDbCache = null; }
+  return pspDbCache;
+}
+async function refreshPspDb(force) {
+  const f = path.join(patchesDir(), 'psp-cheat.db');
+  try { if (!force && Date.now() - fs.statSync(f).mtimeMs < 7 * 864e5) return; } catch { /* absent */ }
+  const r = await net.fetch(Patches.PSP_DB_URL); if (!r.ok) throw new Error('HTTP ' + r.status);
+  const t = await r.text(); if (!/^_S /m.test(t)) throw new Error('base PSP inattendue');
+  fs.mkdirSync(patchesDir(), { recursive: true }); fs.writeFileSync(f, t); pspDbCache = null;
+  log?.write('INFO', `60 images/s PSP : base à jour (${pspDb()?.size || 0} jeux)`);
+}
+async function cachePs1(serial) {
+  const id = Patches.dashSerial(serial); if (!id) return;
+  const f = path.join(patchesDir(), 'PS1', id + '.txt');
+  try { if (Date.now() - fs.statSync(f).mtimeMs < 7 * 864e5) return; } catch { /* absent */ }
+  const texts = [];
+  for (const d of ['patches', 'cheats']) { const r = await net.fetch(`${Patches.PS1_RAW}/${d}/${id}.cht`); if (r.ok) texts.push(await r.text()); else if (r.status !== 404) throw new Error('HTTP ' + r.status); }
+  fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, Patches.ps1Sixty(...texts).join('\n')); // vide = pas de patch
+}
+// Options du cœur liées aux patchs (PPSSPP : lire les triches)
+function runnerPatchOpts(g) { return g.console === 'PSP' ? ['ppsspp_cheats=enabled'] : []; }
+// Prépare les patchs d'un jeu juste avant de le lancer ; renvoie les arguments du moteur
+function runnerPatchArgs(g) {
+  const on = fps60On(g), serial = decorate(g).serial;
+  try {
+    if (g.console === 'PSP' && Patches.plainSerial(serial)) {
+      const entry = pspDb()?.get(Patches.plainSerial(serial)), c = Patches.pickPsp60(entry);
+      const dir = path.join(runnerPaths(g).saves, 'PSP', 'Cheats'), file = path.join(dir, Patches.plainSerial(serial) + '.ini');
+      if (c) { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(file, Patches.pspIni(serial, entry.title, c, on)); log?.write('INFO', `60 images/s PSP : ${c.name} ${on ? 'activé' : 'désactivé'}`); }
+      else if (!pspDb()) refreshPspDb().catch(() => {}); // base pas encore là : prête pour la prochaine partie
+    }
+    if (g.console === 'PS1' && on && Patches.dashSerial(serial)) {
+      const f = path.join(patchesDir(), 'PS1', Patches.dashSerial(serial) + '.txt');
+      if (exists(f) && fs.readFileSync(f, 'utf8').trim()) { log?.write('INFO', '60 images/s PS1 : patch activé'); return ['--cheats', f]; }
+      if (!exists(f)) cachePs1(serial).catch(() => {});
+    }
+  } catch (e) { log?.write('INFO', `patchs : ${e.message}`); }
+  return [];
+}
+// Par défaut, dès qu'un jeu Switch est dans la bibliothèque (une fois par jeu, revérifié chaque semaine)
+let fps60Busy = false;
+async function fps60Sweep() {
+  if (fps60Busy || settings().fps60Auto === false) return; fps60Busy = true;
+  try {
+    // PSP : toute la base (couvre tous les jeux qui ont un code), PS1 : jeux de la bibliothèque + les 15 plus joués
+    try { await refreshPspDb(); } catch (e) { log?.write('INFO', `60 images/s PSP : ${e.message}`); }
+    const ps1 = new Set([...games.filter(g => g.console === 'PS1').map(g => decorate(g).serial), ...Patches.TOP.PS1].map(Patches.dashSerial).filter(Boolean));
+    for (const s of ps1) { try { await cachePs1(s); } catch { break; } }
+    // Switch : les 15 plus joués, même absents de la bibliothèque (prêts le jour où le jeu arrive)
+    const owned = new Set(games.filter(isSwitch).map(g => String(decorate(g).titleId || titleIdFrom(g.file) || '').toUpperCase()));
+    const done = store.get('fps60Top') || {};
+    for (const tid of Patches.TOP.SWITCH) {
+      if (owned.has(tid) || (done[tid] && Date.now() - done[tid] < 7 * 864e5)) continue;
+      let r; try { r = await applyFps60({ id: 'top-' + tid, file: `[${tid}]`, console: 'SWITCH', title: tid }, true); } catch (e) { r = { ok: false, why: e.message }; }
+      if (!r.ok && !r.none) break;
+      done[tid] = Date.now(); store.data.fps60Top = done; store.save();
+    }
+    for (const g of games.filter(isSwitch)) {
+      if ((extOpts(g.id)['Arcadia/fps60'] || 'on') !== 'on') continue;
+      const m = (store.get('media') || {})[g.id] || {};
+      if (m.fps60 && Date.now() - m.fps60.at < 7 * 864e5) continue;
+      let r; try { r = await applyFps60(g, true); } catch (e) { r = { ok: false, why: e.message }; }
+      if (!r.ok && !r.none) break; // hors ligne ou limite GitHub : on réessaiera plus tard
+      const media = store.get('media') || {}; (media[g.id] ||= {}).fps60 = { at: Date.now(), n: r.n || 0 }; store.save();
+    }
+  } finally { fps60Busy = false; }
+}
+
+// ---------------------------------------------------------------- compteur d'images/s par-dessus le jeu
+// Les moteurs Arcadia (Switch et moteur intégré) écrivent leurs images/s dans ce fichier chaque seconde.
+function statsFile() { return path.join(app.getPath('temp'), `arcadia-stats-${process.pid}.json`); }
+const HUD = { win: null, timer: null, id: null, last: 0, key: '' };
+const HUD_SIZE = { s: [128, 46], m: [168, 60], l: [236, 84] };
+function hudPlace() {
+  const st = settings(), [w, h] = HUD_SIZE[st.fpsHudSize] || HUD_SIZE.m, pos = st.fpsHudPos || 'tl';
+  const b = HUD.display || screen.getPrimaryDisplay().bounds, m = 18;
+  const x = pos.endsWith('r') ? b.x + b.width - w - m : b.x + m, y = pos.startsWith('b') ? b.y + b.height - h - m : b.y + m;
+  HUD.win.setBounds({ x: Math.round(x), y: Math.round(y), width: w, height: h });
+}
+function hudStart(id) {
+  hudStop();
+  try { fs.unlinkSync(statsFile()); } catch { /* pas encore créé */ }
+  HUD.id = id; HUD.display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).bounds;
+  HUD.timer = setInterval(hudTick, 500);
+}
+function hudStop() {
+  clearInterval(HUD.timer); HUD.timer = null; HUD.id = null;
+  if (HUD.win && !HUD.win.isDestroyed()) HUD.win.destroy();
+  HUD.win = null; HUD.key = '';
+}
+function hudTick() {
+  const st = settings();
+  let d = null; try { d = JSON.parse(fs.readFileSync(statsFile(), 'utf8')); } catch { /* moteur sans compteur, ou pas encore démarré */ }
+  const show = st.fpsHud && d && !OV.open;
+  if (!show) { if (HUD.win && !HUD.win.isDestroyed()) HUD.win.hide(); return; }
+  if (!HUD.win || HUD.win.isDestroyed()) {
+    HUD.win = new BrowserWindow({ width: 168, height: 60, show: false, frame: false, transparent: true, backgroundColor: '#00000000', resizable: false, movable: false, focusable: false,
+      skipTaskbar: true, alwaysOnTop: true, hasShadow: false, fullscreenable: false, webPreferences: { contextIsolation: true, nodeIntegration: false, preload: path.join(__dirname, 'hud-preload.js') } });
+    HUD.win.setAlwaysOnTop(true, 'screen-saver'); HUD.win.setIgnoreMouseEvents(true);
+    HUD.win.loadFile(path.join(__dirname, 'renderer', 'hud.html'));
+    HUD.key = '';
+  }
+  const key = `${st.fpsHudPos}|${st.fpsHudSize}`;
+  if (key !== HUD.key) { HUD.key = key; hudPlace(); }
+  HUD.win.webContents.send('hud', { fps: d.fps, speed: d.speed, size: st.fpsHudSize || 'm', accent: UI_ACCENT.c || '#39e5c8' });
+  if (!HUD.win.isVisible()) HUD.win.showInactive();
+}
+// Réglages vidéo/son que le moteur Switch applique en direct (fichier relu par le moteur s'il change)
+function liveIni(id) {
+  const o = extOpts(id), out = [];
+  for (const opt of SW_OPTS.filter(x => x.live)) { const v = o[opt.key]; if (v !== undefined) out.push(`${opt.key.split('/')[1]}=${v}`); }
+  return out.join('\n') + '\n';
+}
 function extOpts(id) { return ((store.get('extOpts') || {})[id]) || {}; }
 function overlayData() {
   const G = OV.game; if (!G) return null;
   const g = games.find(x => x.id === G.id);
-  const d = { title: G.title, console: G.consoleName, seconds: Math.round((Date.now() - G.start) / 1000), note: G.note, kind: G.kind };
+  const d = { title: G.title, console: G.consoleName, seconds: Math.round((Date.now() - G.start) / 1000), note: G.note, kind: G.kind, accent: UI_ACCENT.c, onAccent: UI_ACCENT.on };
   const inp = settings().input;
   d.pad = { name: inp && inp.type !== 'keyboard' ? inp.name : (G.padName || 'Clavier & souris'), type: inp ? inp.type : 'keyboard' };
   d.shortcuts = [['Échap', 'Ouvrir / fermer ce menu'], ['Guide (Xbox)', 'Ouvrir / fermer ce menu'], ['Back + Start', 'Ouvrir ce menu'], ['Back + Start (1,5 s)', 'Quitter le jeu'], ['F11', 'Plein écran / fenêtré']];
   if (G.kind === 'switch') {
     const inp0 = settings().input;
     const cur = { 'Arcadia/control': inp0 && inp0.type === 'keyboard' ? 'keyboard' : 'pad', ...SwitchCfg.readOpts(G.userDir, SW_OPTS.map(o => o.key)), ...extOpts(G.id) };
-    d.opts = SW_OPTS.filter(o => !(G.dsu && o.key === 'Arcadia/control')).map(o => ({ ...o, value: String(cur[o.key] ?? o.def) }));
+    cur['Arcadia/hud'] = String(!!settings().fpsHud);
+    if (!cur['Arcadia/fps60']) cur['Arcadia/fps60'] = 'on';
+    d.opts = SW_OPTS.filter(o => !((G.dsu || G.engine) && o.key === 'Arcadia/control')).map(o => ({ ...o, value: String(cur[o.key] ?? o.def) }));
     d.dsu = !!G.dsu;
     const dg = g && decorate(g);
     if (dg && dg.langs && dg.langs.length) {
@@ -1006,6 +1622,8 @@ function overlayData() {
     }
     d.pending = !!G.changed;
   }
+  // moteur Arcadia : périphérique et touches réattribuables (appliqués à la reprise, sans relancer)
+  if (G.engine) d.controls = { labels: Controls.labels(G.consoleId), actions: Controls.ACTIONS, ...Controls.read(controlsDir(), G.consoleId) };
   try {
     const items = g ? Saves.list(gameSavesDir(g)) : [];
     d.saves = { count: items.length, items: items.slice(0, 8).map(b => ({ iso: b.iso, machine: b.machine, thumb: thumbUrl(b.thumb) })) };
@@ -1017,15 +1635,36 @@ function thumbUrl(file, w = 360) {
   try { const im = nativeImage.createFromPath(file); return im.isEmpty() ? null : im.resize({ width: w }).toDataURL(); } catch { return null; }
 }
 // Image du jeu au moment de la pause (le moteur est figé) : sert de miniature aux copies de sauvegarde
+async function captureScreen() {
+  if (!desktopCapturer) return null;
+  const disp = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  const srcs = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 960, height: Math.round(960 * disp.size.height / disp.size.width) } });
+  const src = srcs.find(x => String(x.display_id) === String(disp.id)) || srcs[0];
+  return src && !src.thumbnail.isEmpty() ? src.thumbnail.toPNG() : null;
+}
 async function grabShot() {
   OV.shot = null;
-  if (!desktopCapturer) return;
+  try { OV.shot = await captureScreen(); if (OV.shot && OV.game) liveShots.set(OV.game.id, OV.shot); } catch (e) { log?.write('INFO', `capture du menu : ${e.message}`); }
+}
+// Miniatures des sauvegardes : image du jeu prise régulièrement pendant la partie (jeu devant, pas de menu Arcadia)
+const liveShots = new Map();
+function watchShots(id) {
+  const t = setInterval(async () => {
+    if (!running.has(id)) { clearInterval(t); return; }
+    if (OV.open || (win && win.isFocused())) return;
+    try { const png = await captureScreen(); if (png && running.has(id) && !OV.open) liveShots.set(id, png); } catch { /* écran indisponible */ }
+  }, 45000);
+  return () => clearInterval(t);
+}
+function keepShot(g, backup) {
+  const png = liveShots.get(g.id); liveShots.delete(g.id);
+  if (!png) return;
   try {
-    const disp = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
-    const srcs = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 960, height: Math.round(960 * disp.size.height / disp.size.width) } });
-    const src = srcs.find(x => String(x.display_id) === String(disp.id)) || srcs[0];
-    if (src && !src.thumbnail.isEmpty()) OV.shot = src.thumbnail.toPNG();
-  } catch (e) { log?.write('INFO', `capture du menu : ${e.message}`); }
+    const dir = gameSavesDir(g); fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'derniere-partie.png'), png); // « Continuer »
+    const target = backup?.file || (Saves.list(dir)[0] || {}).file; // la copie faite à la fermeture (ou la dernière sans image)
+    if (target && !exists(target + '.png')) fs.writeFileSync(target + '.png', png);
+  } catch { /* sans miniature */ }
 }
 function overlayWin() {
   if (OV.win && !OV.win.isDestroyed()) return OV.win;
@@ -1103,11 +1742,30 @@ ipcMain.handle('ov:set', (_e, key, value) => {
     const gs = store.get('gameSettings') || {}; gs[G.id] = { ...(gs[G.id] || {}), lang: value || null }; store.set('gameSettings', gs);
     G.changed = true; return overlayData();
   }
+  if (G && key === 'Arcadia/hud') { store.data.settings = { ...settings(), fpsHud: value === 'true' || value === true }; store.save(); return overlayData(); } // réglage commun à tous les jeux
   if (!G || !SW_OPTS.some(o => o.key === key)) return overlayData();
   const all = store.get('extOpts') || {};
   all[G.id] = { ...(all[G.id] || {}), [key]: String(value) };
+  if (key === 'Arcadia/frame_gen') delete all[G.id]['Renderer/frame_gen']; // ancien réglage
   store.data.extOpts = all; store.save();
-  G.changed = true;
+  const opt = SW_OPTS.find(o => o.key === key);
+  if (opt && opt.live && G.userDir) { // appliqué tout de suite par le moteur
+    try { fs.writeFileSync(path.join(G.userDir, 'arcadia-live.ini'), liveIni(G.id)); } catch (e) { log?.write('INFO', `réglages en direct : ${e.message}`); }
+  } else G.changed = true;
+  if (key === 'Arcadia/fps60') {
+    const g = games.find(x => x.id === G.id);
+    if (g) applyFps60(g, value === 'on').then(r => { if (!r.ok) log?.write('INFO', `60 images/s : ${r.why}`); if (OV.win && !OV.win.isDestroyed()) OV.win.webContents.send('ov:toast', r.ok ? (value === 'on' ? '60 images/s prêt : relance le jeu' : '60 images/s retiré : relance le jeu') : `60 images/s : ${r.why}`); }).catch(() => {});
+  }
+  if (((key === 'Arcadia/frame_gen' && value === 'dlss') || (key === 'Renderer/nvidia_dlss' && value === 'true')) && !streamlineReady()) installStreamline().catch(() => {});
+  return overlayData();
+});
+ipcMain.handle('ov:ctl', (_e, patch) => {
+  const G = OV.game; if (!G || !G.engine) return overlayData();
+  let c = Controls.read(controlsDir(), G.consoleId);
+  if (patch.reset) { const d = c.device; c = Controls.defaults(G.consoleId); c.device = d; }
+  if (patch.device && Controls.DEVICES.includes(patch.device)) c.device = patch.device;
+  if (patch.assign) Controls.assign(c, patch.assign.kind, patch.assign.action, patch.assign.code);
+  Controls.write(controlsDir(), G.consoleId, c);
   return overlayData();
 });
 ipcMain.handle('ov:do', async (_e, what) => {
@@ -1161,41 +1819,60 @@ function startGame(id, opts = {}) {
   if (running.has(id)) return { ok: false, error: `${g.title} est déjà lancé.` };
   try {
     const setup = setupFor(g, opts.external);
-    let swDir = null, branded = false, useDsu = false;
+    if (!setup) { // aucun émulateur externe pour prendre le relais
+      const nb = runnerNeedsBios(g.console);
+      if (nb) return { ok: false, needBios: { console: nb, label: BIOS[nb].label }, error: `${BIOS[nb].label} manquant.` };
+    }
+    if (setup && setup.emulator === 'rpcs3' && !ps3FirmwareOk(setup.exe)) return { ok: false, needPs3Fw: true, error: 'Firmware PS3 manquant.' };
+    if (setup && setup.emulator === 'vita3k' && !vitaFirmwareOk(setup.exe)) return { ok: false, needVitaFw: true, error: 'Firmware PS Vita manquant.' };
+    if (setup && setup.emulator === 'xemu') { const n = xemuNeeds(setup.exe); if (n.mcpx || n.bios || n.hdd) return { ok: false, needXbox: n, error: 'Fichiers système Xbox manquants.' }; }
+    let swDir = null, branded = false, useDsu = false, engine = null;
     const t0 = Date.now();
     // Switch : sans prod.keys ni firmware, l'émulateur s'ouvrirait sur une erreur → on demande d'abord
     if (setup && SWITCH_EMUS.includes(setup.emulator)) {
       const need = switchNeeds(setup);
       if (need.keys || need.firmware) return { ok: false, needSwitch: { ...need, emulator: KNOWN_EMULATORS[setup.emulator]?.name || setup.emulator }, error: need.keys ? 'Clés Switch (prod.keys) manquantes.' : 'Firmware Switch manquant.' };
       swDir = need.dir;
-      if (setup.emulator !== 'lichii') {
+      const gsx = (store.get('gameSettings') || {})[id] || {};
+      const asw = settings().switchEngine !== 'eden' && gsx.fallback !== app.getVersion() ? arcadiaSwitchExe() : null; // Switch 1 et 2
+      if (asw) {
+        const guid = (settings().input || {}).guid || '';
+        try { SwitchCfg.prepare(need.dir, { opts: { ...Langs.switchOpts(gameLang(g)), ...swEngineOpts(id) }, arcadia: true }); } catch (e) { log?.write('INFO', `réglages Switch : ${e.message}`); }
+        engine = { exe: asw, args: KNOWN_EMULATORS.edencli.args, env: { ARCADIA: '1', ARCADIA_USER_DIR: need.dir, ARCADIA_TITLE: `${decorate(g).title} — Arcadia`, ARCADIA_PAD_DB: exists(padDbPath()) ? padDbPath() : '', ARCADIA_PAD_GUID: guid, ARCADIA_CONTROLS: controlsFile(g.console), ARCADIA_STATS: statsFile(), ARCADIA_LIVE: path.join(need.dir, 'arcadia-live.ini'), ARCADIA_MOUSE: extOpts(id)['Arcadia/mouse'] || 'camera' } };
+        log?.write('INFO', 'moteur Switch d\'Arcadia');
+      } else if (setup.emulator !== 'lichii') {
         const inp = settings().input || {}, guid = inp.guid || '';
         const keyboard = (extOpts(id)['Arcadia/control'] || (inp.type === 'keyboard' ? 'keyboard' : 'pad')) === 'keyboard';
         // manette + clavier en même temps : Arcadia sert les deux au moteur comme une seule manette (compagnon natif)
         useDsu = helper.available && helper.dsuReady === true;
-        try { const r = SwitchCfg.prepare(need.dir, { guid, mapping: padDbFor(guid), opts: { ...Langs.switchOpts(gameLang(g)), ...extOpts(id) }, keyboard, dsu: useDsu }); log?.write('INFO', `moteur Switch prêt (manette ${r.pad || 'pas encore détectée : clavier pour cette fois'})`); } catch (e) { log?.write('INFO', `réglages Switch : ${e.message}`); }
+        try { const r = SwitchCfg.prepare(need.dir, { guid, mapping: padDbFor(guid), opts: { ...Langs.switchOpts(gameLang(g)), ...swEngineOpts(id) }, keyboard, dsu: useDsu }); log?.write('INFO', `moteur Switch prêt (manette ${r.pad || 'pas encore détectée : clavier pour cette fois'})`); } catch (e) { log?.write('INFO', `réglages Switch : ${e.message}`); }
       }
 
     }
     // émulateurs externes : copie « Arcadia » de l'exécutable (icône + nom Arcadia dans la barre des tâches,
-    // le mélangeur de volume, le gestionnaire des tâches). L'original n'est jamais modifié ; certains
-    // émulateurs nomment leur configuration d'après l'exe (Xenia) ou ont leur propre interface (Lichii) : exclus.
+    // le mélangeur de volume, le gestionnaire des tâches). L'original n'est jamais modifié ; exclus : Xenia (config
+    // nommée d'après l'exe), Lichii (interface propre), DuckStation (licence sans œuvres dérivées).
     const brandOff = (o => (typeof o === 'object' && o) || {})(settings().brandOff);
-    if (setup && !setup.runner && setup.exe && !['xenia', 'lichii', 'retroarch'].includes(setup.emulator) && !brandOff[setup.emulator] && settings().brandOff !== true) {
+    if (setup && !engine && !setup.runner && setup.exe && !['xenia', 'lichii', 'retroarch', 'duckstation'].includes(setup.emulator) && !brandOff[setup.emulator]) { // (l'ancien « brandOff: true » global venait d'un module défaillant : ignoré)
       const cons = (CONSOLES.find(c => c.id === g.console) || {}).name || g.console;
       const tag = setup.emulator === 'edencli' || setup.emulator === 'eden' ? 'Switch' : String(g.console).replace(/[^\w ]/g, '');
       const b = Brand.brandedExe(setup.exe, `Arcadia ${tag}.exe`, ARCADIA_ICO(), { description: `Arcadia · ${cons}` });
-      if (b !== setup.exe) { setup.exe = b; branded = true; } else if (process.platform === 'win32') log?.write('INFO', `copie Arcadia impossible pour ${setup.emulator} : exécutable d'origine utilisé`);
+      if (b !== setup.exe) { setup.exe = b; branded = true; } else if (process.platform === 'win32') log?.write('INFO', `copie Arcadia impossible pour ${setup.emulator} (${Brand.lastError() || '?'}) : exécutable d'origine utilisé`);
     }
     const title = decorate(g).title;
     // moteurs externes : comme le moteur intégré, on propose de reprendre (sauvegarde actuelle ou une copie)
     if (setup && !setup.runner && !opts.skipResume && settings().resumePrompt !== false) {
       let items = [];
       try { items = Saves.list(gameSavesDir(g)); } catch { /* aucune copie */ }
-      if (items.length) return { ok: false, resumePick: { items: items.slice(0, 9).map((b, i) => ({ i, file: b.file, iso: b.iso, machine: b.machine, thumb: thumbUrl(b.thumb, 420) })) } };
+      if (items.length) {
+        const last = path.join(gameSavesDir(g), 'derniere-partie.png');
+        let lastAt = null; try { lastAt = fs.statSync(last).mtime.toISOString(); } catch { /* jamais capturée */ }
+        return { ok: false, resumePick: { last: lastAt ? thumbUrl(last, 640) : null, lastAt, items: items.slice(0, 12).map((b, i) => ({ i, file: b.file, iso: b.iso, machine: b.machine, thumb: thumbUrl(b.thumb, 420) })) } };
+      }
     }
     let pad = null;
     const onExit = (seconds, error, code) => {
+      hudStop();
       pad?.stop();
       detachOverlay(id);
       try { opts.onExit && opts.onExit(); } catch { /* serveur déjà arrêté */ }
@@ -1208,6 +1885,21 @@ function startGame(id, opts = {}) {
         store.data.settings = { ...settings(), brandOff: { ...bo, [setup.emulator]: true } }; store.save();
         log?.write('INFO', 'moteur aux couleurs d\'Arcadia : échec au démarrage, retour à l\'exécutable d\'origine');
         setTimeout(() => startGame(id, opts), 500); return;
+      }
+      // moteur Arcadia qui plante au démarrage de ce jeu : on relance tout de suite sur le moteur de secours,
+      // et on retient le jeu (jusqu'à la prochaine version d'Arcadia, qui retentera le moteur Arcadia)
+      const early = Date.now() - t0 < 90000 && !closedByArcadia.has(pid) && !OV.relaunch;
+      const engineCrash = engine ? (code !== 0 && code != null) : setup?.runner ? !!error : false;
+      closedByArcadia.delete(pid);
+      if (early && engineCrash) {
+        const backup = engine ? setup : setupFor(g, true);
+        if (backup && !(engine ? false : backup.runner)) {
+          const all = store.get('gameSettings') || {};
+          all[id] = { ...(all[id] || {}), fallback: app.getVersion() }; store.set('gameSettings', all);
+          log?.write('ERREUR', `moteur Arcadia : plantage au démarrage de ${title} (${error || 'code ' + code}) → moteur de secours ${backup.emulator}`);
+          win?.webContents.send('game:fallback', { id, title });
+          setTimeout(() => startGame(id, { ...opts, skipResume: true }), 800); return;
+        }
       }
       if (OV.relaunch === id) {
         OV.relaunch = null;
@@ -1222,14 +1914,19 @@ function startGame(id, opts = {}) {
       try { Saves.logSession(gameSavesDir(g), { start: Date.now() - seconds * 1000, end: Date.now(), seconds, emulator: setup?.emulator || null }); } catch { /* disque plein ? */ }
       let backup = null;
       if (settings().autoBackup) { try { backup = backupFor(g); } catch (e) { backup = { error: e.message }; } }
+      keepShot(g, backup);
       win?.webContents.send('game:exited', { id, seconds, stats: store.get('stats'), backup });
     };
-    const langOpts = setup?.runner ? Langs.runnerOpts(g.console, gameLang(g)).flatMap(o => ['--opt', o]) : [];
-    const pid = setup?.runner ? launchRunner(setup, g, title, onExit, [...langOpts, ...(opts.runnerArgs || [])]) : launch(setup, g.path, onExit, padEnv());
+    if (setup?.runner) ensureRunnerPreset(g.console);
+    const langOpts = setup?.runner ? [...coreFixedOpts(setup), ...Langs.runnerOpts(g.console, gameLang(g)), ...runnerPatchOpts(g)].flatMap(o => ['--opt', o]) : [];
+    const patchArgs = setup?.runner ? runnerPatchArgs(g) : [];
+    const pid = setup?.runner ? launchRunner(setup, g, title, onExit, [...langOpts, ...patchArgs, ...(opts.runnerArgs || [])]) : (engine ? launch({ ...setup, exe: engine.exe, args: engine.args }, g.path, onExit, { ...padEnv(), ...engine.env }) : launch(setup, g.path, onExit, padEnv()));
     running.set(id, pid);
+    hudStart(id);
+    if (!setup?.runner) watchShots(id);
     if (setup?.runner && helper.available) helper.adopt(pid, '', ARCADIA_ICO(), AUMID);
     if (!setup?.runner) { // le moteur intégré a son propre menu ; pour les autres, menu Arcadia par-dessus
-      attachOverlay(id, pid, g, title, setup, { userDir: swDir, dsu: useDsu });
+      attachOverlay(id, pid, g, title, setup, { userDir: swDir, dsu: useDsu, engine: !!engine, consoleId: g.console });
       const onQuit = settings().padQuit ? () => {
         log?.write('INFO', `combo manette : fermeture de ${title}`);
         win?.webContents.send('game:closing', { id });
@@ -1302,12 +1999,12 @@ ipcMain.handle('game:details', async (_e, id, force) => {
   const media = store.get('media');
   const m = media[id] || (media[id] = {});
   const key = settings().sgdbKey || '';
-  const fresh = d => d && d.v === 3 && (d.shots || []).every(exists) && (!d.banner || exists(d.banner))
+  const fresh = d => d && d.v === 4 && (d.shots || []).every(exists) && (!d.banner || exists(d.banner))
     && (d.info || Date.now() - (d.infoTried || 0) < 6 * 3600e3)           // fiche absente : on retente au bout de 6 h
     && (d.bannerKind === 'hero' || !key || Date.now() - (d.heroTried || 0) < 864e5);
   if (!force && fresh(m.details)) return m.details;
-  const prev = m.details && m.details.v === 3 ? m.details : null;
-  const det = { v: 3, desc: null, publisher: null, release: null, shots: [], banner: null, bannerKind: null, info: prev?.info || null, infoTried: prev?.infoTried || 0, heroTried: prev?.heroTried || 0 };
+  const prev = m.details && m.details.v >= 3 ? m.details : null;
+  const det = { v: 4, desc: null, publisher: null, release: null, shots: [], banner: null, bannerKind: null, info: prev?.info || null, infoTried: prev?.infoTried || 0, heroTried: prev?.heroTried || 0 };
   const title = decorate(g).title;
   try {
     if (isSwitch(g)) {
@@ -1358,6 +2055,8 @@ ipcMain.handle('game:details', async (_e, id, force) => {
   }
   if (!det.banner && prev?.bannerKind === 'hero' && exists(prev.banner)) { det.banner = prev.banner; det.bannerKind = 'hero'; }
   if (!det.banner && det.shots[0]) { det.banner = det.shots[0]; det.bannerKind = 'shot'; }
+  // grande bannière seulement en bonne qualité (au moins 1920 px de large) ; sinon bannière normale
+  if (det.bannerKind === 'hero') { try { const w = nativeImage.createFromPath(det.banner).getSize().width; if (!w || w < 1920) det.bannerKind = 'shot'; } catch { det.bannerKind = 'shot'; } }
   m.details = det; store.save();
   return det;
 });
@@ -1442,6 +2141,25 @@ ipcMain.handle('game:playMulti', async (_e, id, o) => {
 // ---------------------------------------------------------------- IPC : 1.5
 ipcMain.handle('app:log', (_e, level, msg) => log?.write(level, String(msg).slice(0, 4000)));
 ipcMain.handle('app:openLog', () => shell.openPath(log.file));
+// Rapport de plantage : journaux d'Arcadia et des moteurs dans un seul .zip sur le Bureau (rien n'est envoyé tout seul)
+ipcMain.handle('app:report', () => {
+  try {
+    const entries = [];
+    const add = (file, as) => { try { const st = fs.statSync(file); if (st.isFile() && st.size < 30 * 1024 * 1024) entries.push({ name: as, data: fs.readFileSync(file), mtime: st.mtime }); } catch { /* absent */ } };
+    add(log.file, 'arcadia/arcadia.log'); add(log.file + '.1', 'arcadia/arcadia.log.1');
+    for (const [i, d] of switchTargets().entries()) for (const f of ['eden_log.txt', 'eden_log.txt.old.txt', 'arcadia-crash.txt']) add(path.join(d, 'log', f), `switch-${i}/${f}`);
+    const rd = runnerData();
+    for (const sub of ['', 'log', 'logs']) { try { for (const f of fs.readdirSync(path.join(rd, sub))) if (/\.(log|txt)$/i.test(f)) add(path.join(rd, sub, f), `moteur-arcadia/${sub ? sub + '-' : ''}${f}`); } catch { /* */ } }
+    const os = require('os');
+    const info = { version: app.getVersion(), electron: process.versions.electron, os: `${os.type()} ${os.release()} ${os.arch()}`, cpu: os.cpus()[0]?.model, ram: Math.round(os.totalmem() / 1e9) + ' Go', date: new Date().toISOString(),
+      settings: Object.fromEntries(Object.entries(settings()).filter(([k]) => !/key|token|discord|path|dir/i.test(k))) };
+    entries.unshift({ name: 'infos.json', data: Buffer.from(JSON.stringify(info, null, 2)) });
+    const out = path.join(app.getPath('desktop'), `Arcadia-rapport-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.zip`);
+    require('./src/ziplite').writeZip(out, entries);
+    shell.showItemInFolder(out);
+    return { ok: true, file: out, count: entries.length - 1 };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
 ipcMain.handle('app:storeBackups', () => listStoreBackups(path.join(savesRoot(), '_arcadia')));
 ipcMain.handle('app:restoreStore', (_e, file) => {
   const dir = path.join(savesRoot(), '_arcadia');
@@ -1676,7 +2394,7 @@ ipcMain.handle('library:sort', async () => {
 function emuCtx(id) {
   const fromMapping = Object.values(store.get('mapping') || {}).find(m => m.emulator === id && m.exe);
   let exe = fromMapping ? fromMapping.exe : null;
-  if (!exe && store.get('emulatorsDir')) exe = detectEmulators(store.get('emulatorsDir'))[id] || null;
+  for (const d of [store.get('emulatorsDir'), EMU_DIR()]) if (!exe && d && exists(d)) exe = detectEmulators(d)[id] || null;
   return {
     exe,
     exeDir: exe ? path.dirname(exe) : path.join(app.getPath('temp'), '__arcadia_no_exe__'),
@@ -1722,8 +2440,34 @@ const RUNNER_PRESETS = {
   '3DS': { minimal: { citra_resolution_factor: '1' }, moyenne: { citra_resolution_factor: '2' }, maximum: { citra_resolution_factor: '4' } },
   DS: { minimal: { melonds_opengl_renderer: 'disabled', melonds_opengl_resolution: '1x native (256x192)' },
         moyenne: { melonds_opengl_renderer: 'enabled', melonds_opengl_resolution: '2x native (512x384)' },
-        maximum: { melonds_opengl_renderer: 'enabled', melonds_opengl_resolution: '4x native (1024x768)' } }
+        maximum: { melonds_opengl_renderer: 'enabled', melonds_opengl_resolution: '4x native (1024x768)' } },
+  N64: { minimal: { 'mupen64plus-EnableNativeResFactor': '1' }, moyenne: { 'mupen64plus-EnableNativeResFactor': '2' }, maximum: { 'mupen64plus-EnableNativeResFactor': '4' } },
+  PS1: { minimal: { swanstation_GPU_ResolutionScale: '1' }, moyenne: { swanstation_GPU_ResolutionScale: '3' }, maximum: { swanstation_GPU_ResolutionScale: '5' } },
+  DREAMCAST: { minimal: { reicast_internal_resolution: '640x480' }, moyenne: { reicast_internal_resolution: '1280x960' }, maximum: { reicast_internal_resolution: '2560x1920' } },
+  GAMECUBE: { minimal: { dolphin_efb_scale: '1' }, moyenne: { dolphin_efb_scale: '2' }, maximum: { dolphin_efb_scale: '4' } },
+  WII: { minimal: { dolphin_efb_scale: '1' }, moyenne: { dolphin_efb_scale: '2' }, maximum: { dolphin_efb_scale: '4' } },
+  PS2: { minimal: { pcsx2_upscale_multiplier: '1x (Native)' }, moyenne: { pcsx2_upscale_multiplier: '2x' }, maximum: { pcsx2_upscale_multiplier: '4x' } }
 };
+// Console ajoutée après le choix du profil : on lui applique le profil retenu au premier lancement
+function ensureRunnerPreset(consoleId) {
+  const p = RUNNER_PRESETS[consoleId]; if (!p) return;
+  const file = path.join(runnerData(), 'config', `${Saves.safe(consoleId)}.ini`);
+  if (exists(file)) return;
+  const lvl = settings().perfLevel === 'auto' ? (HW_CACHE?.level || 'moyenne') : (settings().perfLevel || 'moyenne');
+  try { writeRunnerConfig(consoleId, p[lvl] || p.moyenne); } catch { /* lecture seule ? */ }
+}
+// Options imposées par Arcadia selon le cœur (BIOS PS1 : SwanStation n'accepte que certains noms de fichier)
+const SWAN_BIOS = { NTSCJ: ['scph5500.bin'], NTSCU: ['scph5501.bin'], PAL: ['scph5502.bin'] };
+const SWAN_ANY = ['scph5500.bin', 'scph5501.bin', 'scph5502.bin', 'ps1_rom.bin'];
+function coreFixedOpts(setup) {
+  // le moteur intégré dessine en OpenGL : « Auto » pourrait choisir Direct3D sous Windows
+  if (setup?.coreName === 'pcsx2_libretro') return ['pcsx2_renderer=OpenGL'];
+  if (setup?.coreName !== 'swanstation_libretro') return [];
+  const have = biosFiles('PS1').map(n => n.toLowerCase()).filter(n => SWAN_ANY.includes(n));
+  if (!have.length) return [];
+  return Object.entries(SWAN_BIOS).map(([r, pref]) => `swanstation_BIOS_Path${r}=${have.find(n => pref.includes(n)) || (have.includes('ps1_rom.bin') ? 'ps1_rom.bin' : have[0])}`)
+    .concat(['swanstation_CDROM_RegionCheck=false', 'swanstation_GPU_Renderer=OpenGL']);
+}
 let HW_CACHE = null;
 async function detectHardware() {
   if (HW_CACHE) return HW_CACHE;

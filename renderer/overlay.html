@@ -63,7 +63,18 @@
   .toast { position: fixed; left: 50%; bottom: 11vh; transform: translateX(-50%) translateY(10px); padding: 14px 28px; border-radius: 26px; background: rgba(12,12,14,.92);
     border: 1px solid rgba(255,255,255,.14); box-shadow: 0 0 30px rgba(255,255,255,.1); font-weight: 700; font-size: 17px; opacity: 0; transition: .25s; pointer-events: none; }
   .toast.show { opacity: 1; transform: translateX(-50%); }
-</style></head>
+  .bindhead { display: grid; grid-template-columns: 1fr 230px 230px; gap: 12px; align-items: end; margin: 22px 0 8px; padding: 0 24px; }
+  .bindhead b { font-size: 20px; } .bindhead span { text-align: center; color: rgba(255,255,255,.5); font-size: 13.5px; }
+  .row.bind { display: grid; grid-template-columns: 1fr 230px 230px; gap: 12px; min-height: 52px; padding: 7px 24px; margin-bottom: 5px; }
+  .row.bind .l { font-size: 16.5px; }
+  .chip { text-align: center; padding: 9px 12px; border-radius: 999px; background: rgba(255,255,255,.08); font-size: 14.5px; font-weight: 600; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chip.off { visibility: hidden; }
+  .row.bind.on { background: rgba(255,255,255,.1); color: #fff; box-shadow: 0 0 0 1px rgba(255,255,255,.25); }
+  .row.bind .chip.sel { background: #f5f5f5; color: #0c0c0e; box-shadow: 0 0 24px rgba(255,255,255,.25); }
+  .chip.cap { background: #fff; color: #0c0c0e; animation: cappulse 1s ease-in-out infinite; }
+  @keyframes cappulse { 50% { box-shadow: 0 0 0 4px rgba(255,255,255,.35); } }
+</style>
+<link rel="stylesheet" href="overlay-neon.css"></head>
 <body>
   <div class="veil"></div>
   <div class="wrap">
@@ -89,14 +100,15 @@
   const el = (t, c, txt) => { const e = document.createElement(t); if (c) e.className = c; if (txt != null) e.textContent = txt; return e; };
   let mouseLive = false; // le survol ne compte que si la souris a vraiment bougé (pas quand le panneau défile dessous)
   document.addEventListener('mousemove', e => { if (e.movementX || e.movementY) mouseLive = true; });
+  let col = 0;
   let D = null, open = false, t0 = 0, sec = 0, focus = 'menu', row = 0, confirm = null, cidx = 1, navSeen = false;
   const SECS = [
     { id: 'resume', ico: '▶', label: 'Reprendre', act: true },
     { id: 'saves', ico: '◆', label: 'Sauvegardes' },
-    { id: 'image', ico: '◐', label: 'Image', sw: true },
+    { id: 'image', ico: '◐', label: 'Vidéo', sw: true },
     { id: 'son', ico: '♪', label: 'Son', sw: true },
     { id: 'langue', ico: '◎', label: 'Langue', sw: true },
-    { id: 'pad', ico: '✦', label: 'Manette' },
+    { id: 'pad', ico: '✦', label: 'Contrôles' },
     { id: 'keys', ico: '⌨', label: 'Raccourcis' },
     { id: 'gap' },
     { id: 'restart', ico: '↻', label: 'Relancer le jeu', act: true },
@@ -160,18 +172,48 @@
       } else p.append(el('div', 'info', 'Aucune copie pour l\'instant : sauvegarde dans le jeu, puis « Copier ma sauvegarde maintenant ».'));
     }
     else if (s.id === 'image' || s.id === 'son' || s.id === 'langue') {
-      head(({ image: 'Image', son: 'Son', langue: 'Langue' })[s.id], ({ image: 'Qualité, fluidité et format du jeu. ◀ ▶ pour changer une valeur.', son: 'Volume du jeu.', langue: 'Uniquement les langues que ce jeu propose. ◀ ▶ pour changer.' })[s.id]);
+      head(({ image: 'Vidéo', son: 'Son', langue: 'Langue' })[s.id], ({ image: 'Qualité, fluidité et format du jeu. ◀ ▶ pour changer une valeur. Chaque réglage indique s\'il s\'applique tout de suite ou en relançant le jeu.', son: 'Volume du jeu.', langue: 'Uniquement les langues que ce jeu propose. ◀ ▶ pour changer.' })[s.id]);
       pending();
       const os = (D.opts || []).filter(o => o.sec === s.id);
       for (const o of os) p.append(optRow(o));
       if (!os.length) p.append(el('div', 'info', s.id === 'langue' ? 'Ce jeu n\'indique pas ses langues : il suit la langue de la console (Paramètres d\'Arcadia → émulateur Switch).' : 'Rien à régler ici pour ce jeu.'));
     }
     else if (s.id === 'pad') {
-      head('Manette', D.dsu ? 'La manette et le clavier marchent en même temps : utilise celui que tu veux, quand tu veux.' : 'La même configuration sert dans tous les jeux et tous les moteurs.');
-      const i = el('div', 'info'); i.textContent = `Manette : ${D.pad.name}${D.dsu ? '  ·  Clavier : actif' : ''}`; p.append(i);
+      const C = D.controls;
+      head('Contrôles', C ? 'Choisis avec quoi tu joues et réattribue chaque touche. Valable pour tous les jeux de cette console.' : (D.dsu ? 'La manette et le clavier marchent en même temps : utilise celui que tu veux, quand tu veux.' : 'La même configuration sert dans tous les jeux et tous les moteurs.'));
+      const i = el('div', 'info'); i.textContent = `Manette : ${D.pad.name}`; p.append(i);
       pending();
+      if (C) {
+        const DEV = [['both', 'Clavier + manette', 'Les deux marchent en même temps.'], ['keyboard', 'Clavier seul', 'La manette est ignorée.'], ['pad', 'Manette seule', 'Le clavier est ignoré.'], ['stick', 'Stick arcade', 'Levier et boutons d\'arcade : le levier pilote aussi le stick gauche.']];
+        const di = Math.max(0, DEV.findIndex(x => x[0] === C.device));
+        p.append(optRow({ key: '__device', label: 'Jouer avec', hint: DEV[di][2], values: DEV.map(x => [x[0], x[1]]), value: C.device }));
+      }
       for (const o of (D.opts || []).filter(o => o.sec === 'manette')) p.append(optRow(o));
       p.append(btnRow('Recalibrer ma manette', 'Appuie sur A, ou règle chaque touche une par une', 'calibrate'));
+      if (C) {
+        const showKb = C.device !== 'pad' && C.device !== 'stick', showPad = C.device !== 'keyboard';
+        const th = el('div', 'bindhead'); th.append(el('b', '', 'Touches'), el('span', '', showKb ? 'Clavier' : ''), el('span', '', showPad ? 'Manette' : '')); p.append(th);
+        for (const a of C.actions) {
+          const padRow = !a.startsWith('ls_') && !a.startsWith('rs_') && a !== 'home';
+          if (!showKb && !padRow) continue;
+          const r = el('div', 'row bind'); r.dataset.bind = a;
+          r.append(el('div', 'l', C.labels[a] || a));
+          const mk = (kind, on) => {
+            const c = el('div', 'chip' + (on ? '' : ' off'));
+            c.dataset.kind = kind;
+            if (on) {
+              const cap = CAP && CAP.action === a && CAP.kind === kind;
+              c.textContent = cap ? (kind === 'kb' ? 'Appuie sur une touche…' : 'Appuie sur un bouton…') : ((kind === 'kb' ? C.kb[a] : C.pad[a]) || []).map(x => kind === 'kb' ? keyName(x) : PADL[x] || x).join(' / ') || '—';
+              if (cap) c.classList.add('cap');
+              c.onclick = ev => { ev.stopPropagation(); startCap(a, kind); };
+            }
+            return c;
+          };
+          r.append(mk('kb', showKb), mk('pad', showPad && padRow));
+          p.append(r);
+        }
+        p.append(btnRow('Rétablir les touches d\'origine', 'Clavier et manette, pour cette console', 'ctlreset'));
+      }
     }
     else if (s.id === 'keys') {
       head('Raccourcis', 'Disponibles pendant toute la partie.');
@@ -181,7 +223,7 @@
       if (D.dsu) {
         p.append(el('div', 'sub', 'Clavier (en même temps que la manette)'));
         const kl = el('div', 'list keys'); p.append(kl);
-        const KB = [[['KeyW', 'KeyA', 'KeyS', 'KeyD'], 'Stick gauche'], [['KeyT', 'KeyF', 'KeyG', 'KeyH'], 'Stick droit'], [['↑ ↓ ← →'], 'Croix'],
+        const KB = [[['KeyW', 'KeyA', 'KeyS', 'KeyD'], 'Stick gauche'], [['KeyT', 'KeyF', 'KeyG', 'KeyH'], 'Stick droit'], [['↑ ↓ ← →'], 'Croix (→ seulement sans manette : la croix droite de la manette sert aussi aux vibrations)'],
           [['KeyL'], 'A'], [['KeyK'], 'B'], [['KeyI'], 'X'], [['KeyJ'], 'Y'], [['KeyQ', 'KeyE'], 'L / R'], [['Digit1', 'Digit3'], 'ZL / ZR'],
           [['Entrée'], '+'], [['Retour arrière'], '−'], [['Maj gauche', 'KeyB'], 'Clic stick gauche / droit'], [['Origine'], 'HOME']];
         (navigator.keyboard && navigator.keyboard.getLayoutMap ? navigator.keyboard.getLayoutMap() : Promise.resolve(null)).catch(() => null).then(m => {
@@ -200,7 +242,10 @@
   }
   function paintSel() {
     document.querySelectorAll('#menu .item').forEach((b, i) => { b.classList.toggle('on', i === sec && focus === 'menu'); b.classList.toggle('cur', i === sec && focus !== 'menu'); });
-    rows().forEach((r, i) => r.classList.toggle('on', focus === 'panel' && i === row));
+    rows().forEach((r, i) => {
+      r.classList.toggle('on', focus === 'panel' && i === row);
+      r.querySelectorAll('.chip:not(.off)').forEach((c, j) => c.classList.toggle('sel', focus === 'panel' && i === row && j === col));
+    });
     const on = rows()[row]; if (focus === 'panel' && on) on.scrollIntoView({ block: 'nearest' });
     const h = $('#hints'); h.replaceChildren();
     const hint = (k, t) => { const s = el('span'); s.append(el('b', '', k), document.createTextNode(t)); h.append(s); };
@@ -211,6 +256,10 @@
   function paint() { paintMenu(); paintPanel(); paintSel(); }
 
   async function cycle(key, d) {
+    if (key === '__device') {
+      const L = ['both', 'keyboard', 'pad', 'stick'], i = L.indexOf(D.controls.device);
+      D = await window.ov.ctl({ device: L[(i + d + 4) % 4] }); paintPanel(); paintSel(); return;
+    }
     const o = (D.opts || []).find(x => x.key === key); if (!o) return;
     let i = o.values.findIndex(v => v[0] === o.value); i = i < 0 ? 0 : (i + d + o.values.length) % o.values.length;
     D = { ...(await window.ov.set(key, o.values[i][0])), _keep: true };
@@ -218,6 +267,7 @@
   }
   async function runAct(what) {
     if (what === 'resume') return close('resume');
+    if (what === 'ctlreset') { D = await window.ov.ctl({ reset: true }); paintPanel(); paintSel(); toast('Touches d\'origine rétablies'); return; }
     if (what === 'quit' || what === 'restart' || what.startsWith('load:')) return ask(what);
     const r = await window.ov.run(what);
     if (r) { const t = r.toast; D = r; paintPanel(); paintSel(); toast(t); }
@@ -237,8 +287,56 @@
     if (s.act) return runAct(s.id === 'restart' ? 'restart' : s.id);
     focus = 'panel'; row = 0; paintSel();
   }
+  // ── Réattribution des touches : clavier (code physique → code SDL) et manette (API Gamepad, disposition standard)
+  const SDLK = { Enter: 40, Escape: 41, Backspace: 42, Tab: 43, Space: 44, Minus: 45, Equal: 46, BracketLeft: 47, BracketRight: 48, Backslash: 49,
+    Semicolon: 51, Quote: 52, Backquote: 53, Comma: 54, Period: 55, Slash: 56, CapsLock: 57, Insert: 73, Home: 74, PageUp: 75, Delete: 76, End: 77,
+    PageDown: 78, ArrowRight: 79, ArrowLeft: 80, ArrowDown: 81, ArrowUp: 82, NumpadDivide: 84, NumpadMultiply: 85, NumpadSubtract: 86, NumpadAdd: 87,
+    NumpadEnter: 88, Numpad0: 98, NumpadDecimal: 99, IntlBackslash: 100, ControlLeft: 224, ShiftLeft: 225, AltLeft: 226, ControlRight: 228, ShiftRight: 229, AltRight: 230 };
+  for (let i = 0; i < 26; i++) SDLK['Key' + String.fromCharCode(65 + i)] = 4 + i;
+  for (let i = 1; i <= 9; i++) { SDLK['Digit' + i] = 29 + i; SDLK['Numpad' + i] = 88 + i; }
+  SDLK.Digit0 = 39; for (let i = 1; i <= 12; i++) SDLK['F' + i] = 57 + i;
+  const CODE_OF = Object.fromEntries(Object.entries(SDLK).map(([c, n]) => [n, c]));
+  const NICE = { Enter: 'Entrée', Escape: 'Échap', Backspace: 'Retour arrière', Tab: 'Tab', Space: 'Espace', ArrowRight: '→', ArrowLeft: '←', ArrowDown: '↓', ArrowUp: '↑',
+    ShiftLeft: 'Maj gauche', ShiftRight: 'Maj droite', ControlLeft: 'Ctrl gauche', ControlRight: 'Ctrl droit', AltLeft: 'Alt', AltRight: 'Alt Gr', Home: 'Origine', End: 'Fin',
+    PageUp: 'Page ↑', PageDown: 'Page ↓', Insert: 'Inser', Delete: 'Suppr', CapsLock: 'Verr. maj' };
+  let LAYOUT = null; (navigator.keyboard && navigator.keyboard.getLayoutMap ? navigator.keyboard.getLayoutMap() : Promise.resolve(null)).then(m => { LAYOUT = m; if (open) paintPanel(); }).catch(() => {});
+  function keyName(sc) { const c = CODE_OF[sc]; if (!c) return '#' + sc; if (NICE[c]) return NICE[c]; const l = LAYOUT && LAYOUT.get(c); return l ? l.toUpperCase() : c.replace(/^Key|^Digit/, ''); }
+  const PADL = { south: 'Bas (A Xbox)', east: 'Droite (B Xbox)', west: 'Gauche (X Xbox)', north: 'Haut (Y Xbox)', back: 'Back', start: 'Start', guide: 'Guide', ls: 'Clic stick G', rs: 'Clic stick D',
+    lb: 'LB', rb: 'RB', lt: 'LT', rt: 'RT', up: 'Croix ↑', down: 'Croix ↓', left: 'Croix ←', right: 'Croix →', misc1: 'Partage' };
+  const STD = ['south', 'east', 'west', 'north', 'lb', 'rb', 'lt', 'rt', 'back', 'start', 'ls', 'rs', 'up', 'down', 'left', 'right']; // API Gamepad standard
+  let CAP = null;
+  function startCap(action, kind) { CAP = { action, kind, t: Date.now(), base: padSnapshot() }; paintPanel(); paintSel(); }
+  async function endCap(code) {
+    const c = CAP; CAP = null;
+    if (code != null) { D = await window.ov.ctl({ assign: { kind: c.kind, action: c.action, code } }); toast(`${(D.controls.labels || {})[c.action] || c.action} → ${c.kind === 'kb' ? keyName(code) : PADL[code] || code}`); }
+    paintPanel(); paintSel();
+  }
+  function padSnapshot() { const out = {}; for (const p of (navigator.getGamepads ? [...navigator.getGamepads()].filter(Boolean) : [])) out[p.index] = p.buttons.map(b => b.pressed); return out; }
+  document.addEventListener('keydown', e => {
+    if (!CAP) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    if (e.code === 'Escape') { endCap(null); toast('Réattribution annulée'); return; }
+    if (CAP.kind !== 'kb' || Date.now() - CAP.t < 200) return;
+    const sc = SDLK[e.code]; if (sc) endCap(sc);
+  }, true);
+  function capPoll() {
+    if (CAP && CAP.kind === 'pad' && Date.now() - CAP.t > 250) {
+      for (const p of (navigator.getGamepads ? [...navigator.getGamepads()].filter(Boolean) : [])) {
+        const before = CAP.base[p.index] || [];
+        for (let i = 0; i < Math.min(16, p.buttons.length); i++) {
+          if (p.buttons[i].pressed && !before[i]) { endCap(STD[i]); return requestAnimationFrame(capPoll); }
+          if (!p.buttons[i].pressed && before[i]) before[i] = false; // relâché : on peut le réattribuer
+        }
+        CAP && (CAP.base[p.index] = before);
+      }
+    }
+    requestAnimationFrame(capPoll);
+  }
+  requestAnimationFrame(capPoll);
+
   function nav(k) {
     if (!open || Date.now() - t0 < 250) return;
+    if (CAP) return; // une touche est en cours de réattribution
     mouseLive = false;
     if (confirm) {
       if (k === 'left' || k === 'right' || k === 'up' || k === 'down') { cidx = 1 - cidx; paintConfirm(); }
@@ -262,6 +360,12 @@
       if (nx < 0) { row = first - 1 >= 0 ? first - 1 : row; paintSel(); return; }
       if (nx >= nt) nx = k === 'down' ? nt - 1 : ti;
       row = first + nx; paintSel(); return;
+    }
+    if (r && r.dataset.bind && (k === 'left' || k === 'right' || k === 'a')) { // ligne de touche : ◀ ▶ = clavier / manette, A = réattribuer
+      const chips = [...r.querySelectorAll('.chip:not(.off)')];
+      if (k === 'a') { const c = chips[col] || chips[0]; if (c) startCap(r.dataset.bind, c.dataset.kind); return; }
+      if (k === 'left' && col <= 0) { focus = 'menu'; paintSel(); return; }
+      col = Math.max(0, Math.min(chips.length - 1, col + (k === 'right' ? 1 : -1))); paintSel(); return;
     }
     if (k === 'down' || k === 'up') { if (rs.length) row = (row + (k === 'down' ? 1 : rs.length - 1)) % rs.length; paintSel(); }
     else if ((k === 'left' || k === 'right') && r && r.dataset.opt) cycle(r.dataset.opt, k === 'right' ? 1 : -1);
@@ -295,10 +399,12 @@
     $('#b1').textContent = b.line1; $('#b2').textContent = b.line2;
     const e = $('#banner'); e.classList.add('show'); clearTimeout(window.__bt); window.__bt = setTimeout(() => e.classList.remove('show'), b.ms || 7000);
   });
+  window.ov.onToast && window.ov.onToast(t => toast(t));
   window.ov.onShow(d => {
     $('#banner').classList.remove('show');
     const reopen = open && D;
     D = d;
+    if (d.accent) { document.documentElement.style.setProperty('--accent', d.accent); document.documentElement.style.setProperty('--on-accent', d.onAccent || '#04110f'); }
     $('#title').textContent = d.title || 'Jeu';
     $('#sub').textContent = `${d.console ? d.console + '  ·  ' : ''}En pause`;
     const m = Math.floor((d.seconds || 0) / 60);

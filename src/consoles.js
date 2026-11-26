@@ -5,8 +5,8 @@
 // titleFromFolder : le titre vient du dossier du jeu, pas du nom de fichier.
 
 const CONSOLES = [
-  { id: 'SWITCH',    name: 'Nintendo Switch',   ext: ['nsp', 'xci', 'nsz', 'xcz', 'nca', 'nro', 'nso'], color: '#e60012' },
-  { id: 'SWITCH 2',  name: 'Nintendo Switch 2', ext: ['nsp', 'xci', 'nsz', 'xcz'],        color: '#ff4d5a' },
+  { id: 'SWITCH',    name: 'Nintendo Switch',   ext: ['nsp', 'xci', 'nsz', 'xcz', 'nup', 'nca', 'nro', 'nso'], color: '#e60012' },
+  { id: 'SWITCH 2',  name: 'Nintendo Switch 2', ext: ['nsp', 'xci', 'nsz', 'xcz', 'nup'], color: '#ff4d5a' },
   { id: '3DS',       name: 'Nintendo 3DS',      ext: ['3ds', 'cci', 'cxi', 'cia', '3dsx', 'app'], color: '#d12228' },
   { id: 'DS',        name: 'Nintendo DS',       ext: ['nds', 'dsi', 'ids'],               color: '#9aa0a6' },
   { id: 'WIIU',      name: 'Wii U',             ext: ['wua', 'wud', 'wux', 'rpx'],        color: '#009ac7' },

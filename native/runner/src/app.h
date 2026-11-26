@@ -10,6 +10,8 @@ struct Toast { std::string text; uint64_t until; };
 
 struct SlotInfo { bool exists = false; std::string date; GLuint thumb = 0; int tw = 0, th = 0; int64_t mtime = 0; };
 
+#include "arcadia_controls.h"
+
 struct App {
   // Arguments
   std::string corePath, gamePath, title = "Jeu", console = "", gameKey = "jeu";
@@ -46,6 +48,9 @@ struct App {
   SDL_Gamepad* pads[4] = {};
   uint16_t padMask[4] = {}; int16_t padAxis[4][6] = {};
   bool guideHeld = false, guideUsed = false;
+  // Contrôles réattribuables (fichier partagé avec Arcadia) ; capture d'une touche depuis le menu
+  ArcadiaControls::Map controls; ArcadiaControls::Watcher ctlWatch;
+  int capAction = -1; bool capKeyboard = true; uint64_t capT0 = 0;
   uint64_t comboT0 = 0;
   // Écran tactile / pointeur (souris, ou stick droit + clic du stick sur DS)
   int viewX = 0, viewY = 0, viewW = 1, viewH = 1;   // rectangle du jeu à l'écran (pixels)
@@ -77,7 +82,7 @@ struct App {
   std::string padDb, padLayout = "xbox";
   void calibrate();
   int calibState = 0; // 0 rien, 1 en cours
-  uint64_t hintT0 = 0; // aide « Contrôles » au début de la partie
+  uint64_t hintT0 = 0; bool hintOff = false; // aide « Contrôles » au début de la partie
 };
 
 extern App g_app;

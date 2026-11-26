@@ -15,11 +15,13 @@ const keys = { prod: parseKeys(keysText), title: {} };
 const align = (n, a) => Math.ceil(n / a) * a;
 
 function enc(alg, key, iv, data) { const c = crypto.createCipheriv(alg, key, iv); c.setAutoPadding(false); return Buffer.concat([c.update(data), c.final()]); }
+// XTS maison (le Node d'Electron n'a pas aes-128-xts) : même code que l'application
+const { xtsCrypt } = require('../src/switchmeta');
 function xts(key, data) {
   const out = Buffer.alloc(data.length);
   for (let s = 0; s * 0x200 < data.length; s++) {
     const t = Buffer.alloc(16); t.writeBigUInt64BE(BigInt(s), 8);
-    enc('aes-128-xts', key, t, data.subarray(s * 0x200, (s + 1) * 0x200)).copy(out, s * 0x200);
+    xtsCrypt(true, key, data.subarray(s * 0x200, (s + 1) * 0x200), s).copy(out, s * 0x200);
   }
   return out;
 }
@@ -168,10 +170,32 @@ console.log('switch: OK');
   const SC = require('../src/switchcfg');
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'sc-'));
   SC.prepare(d, { guid: '030000005e0400008e02000000007801' });
-  const r = SC.prepare(d, { dsu: true });
+  const r = SC.prepare(d, { dsu: true, guid: '030000005e0400008e02000000007801' });
   const t = fs.readFileSync(path.join(d, 'config', 'sdl2-config.ini'), 'utf8');
   assert.strictEqual(r.pad, 'arcadia');
   assert(t.includes('player_0_button_a="engine:cemuhookudp,guid:0000000000000000000000007f000001,port:26760,pad:0,button:8192"'));
-  assert(!t.includes('engine:sdl'));
+  assert(t.includes('enable_udp_controller=true'));
+  assert(t.includes('player_0_button_dright="engine:sdl,port:0,guid:030000005e0400008e02000000007801,hat:0,direction:right"'));
   console.log('switch (manette + clavier via Arcadia): OK');
+}
+
+{
+  const os = require('os'), fs = require('fs'), path = require('path'), assert = require('assert');
+  const SC = require('../src/switchcfg');
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'sc-')); fs.mkdirSync(path.join(d, 'config'));
+  fs.writeFileSync(path.join(d, 'config', 'qt-config.ini'), '[Renderer]\nresolution_setup\\default=false\nresolution_setup=6\nfullscreen_mode=1\n[Controls]\nplayer_0_button_a=x\n');
+  SC.prepare(d, { opts: { 'Audio/volume': '80' } });
+  const t = fs.readFileSync(path.join(d, 'config', 'sdl2-config.ini'), 'utf8');
+  assert(/resolution_setup=6/.test(t) && /resolution_setup\\default=false/.test(t) && /fullscreen_mode=0/.test(t) && !/player_0_button_a=x/.test(t) && /volume=80/.test(t));
+  console.log('switch (réglages Arcadia recopiés vers le moteur): OK');
+}
+{
+  const os = require('os'), fs = require('fs'), path = require('path'), assert = require('assert');
+  const SC = require('../src/switchcfg');
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'sc-')); fs.mkdirSync(path.join(d, 'config'));
+  fs.writeFileSync(path.join(d, 'config', 'sdl2-config.ini'), '[Controls]\nenable_udp_controller=true\nplayer_0_button_a="engine:cemuhookudp,port:0,pad:0,button:8192"\n');
+  const r = SC.prepare(d, { arcadia: true, dsu: true });
+  const t = fs.readFileSync(path.join(d, 'config', 'sdl2-config.ini'), 'utf8');
+  assert(r.pad === 'arcadia' && /player_0_button_a="engine:virtual_gamepad,port:0,button:0"/.test(t) && /enable_udp_controller=false/.test(t) && !/cemuhookudp/.test(t) && /player_0_vibration_enabled=true/.test(t));
+  console.log('switch (moteur Arcadia, manette virtuelle): OK');
 }

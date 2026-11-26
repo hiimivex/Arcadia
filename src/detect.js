@@ -7,7 +7,7 @@ const { IsoReader, readAt } = require('./iso');
 const BY_EXT = {
   nds: 'DS', dsi: 'DS', ids: 'DS',
   '3ds': '3DS', cci: '3DS', cxi: '3DS', cia: '3DS', '3dsx': '3DS',
-  xci: 'SWITCH', nsp: 'SWITCH', nsz: 'SWITCH', xcz: 'SWITCH', nro: 'SWITCH', nso: 'SWITCH', nca: 'SWITCH',
+  nup: 'SWITCH 2', xci: 'SWITCH', nsp: 'SWITCH', nsz: 'SWITCH', xcz: 'SWITCH', nro: 'SWITCH', nso: 'SWITCH', nca: 'SWITCH',
   gba: 'GBA', gb: 'GB', gbc: 'GB', sgb: 'GB',
   sfc: 'SNES', smc: 'SNES', fig: 'SNES', swc: 'SNES',
   nes: 'NES', fds: 'NES', unf: 'NES', unif: 'NES',
@@ -104,6 +104,14 @@ function sniffWia(fd) {
 // Renvoie l'id de console ou null si on ne sait pas.
 function detectFile(file) {
   const ext = path.extname(file).slice(1).toLowerCase();
+  if (ext === 'cue') { // CD PlayStation : PS1 en général, mais certains jeux PS2 sont sur CD (lecture de SYSTEM.CNF)
+    try {
+      const m = /FILE\s+"([^"]+)"/i.exec(fs.readFileSync(file, 'utf8'));
+      const bin = m && path.join(path.dirname(file), m[1]);
+      if (bin && fs.existsSync(bin)) { const fd = fs.openSync(bin, 'r'); try { const c = sniffIso(fd); if (c === 'PS2' || c === 'PS1') return c; } finally { fs.closeSync(fd); } }
+    } catch { /* cue illisible */ }
+    return 'PS1';
+  }
   if (BY_EXT[ext]) return BY_EXT[ext];
   if (!SNIFF.has(ext)) return null;
   let fd;

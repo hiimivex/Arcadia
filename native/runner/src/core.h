@@ -33,6 +33,8 @@ struct Core {
   bool (*unserialize)(const void*, size_t) = nullptr;
   bool (*load_game)(const retro_game_info*) = nullptr;
   void (*unload_game)() = nullptr;
+  void (*cheat_reset)() = nullptr;
+  void (*cheat_set)(unsigned, bool, const char*) = nullptr;
 
   retro_system_info info{};
   retro_system_av_info av{};

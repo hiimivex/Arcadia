@@ -31,7 +31,7 @@ const fake = async url => {
   // rien de pertinent → null
   assert.strictEqual(await wikiInfo('Zzzz', 'PSP', { fetch: async () => ({ ok: true, json: async () => ({ search: [] }) }) }), null);
   // SteamGridDB
-  const sg = async url => ({ ok: true, json: async () => url.includes('autocomplete') ? { data: [{ id: 7, name: 'The 3rd Birthday' }] } : { data: [{ url: 'https://x/a.png', score: 1 }, { url: 'https://x/b.png', score: 5 }] } });
+  const sg = async url => ({ ok: true, json: async () => url.includes('autocomplete') ? { data: [{ id: 7, name: 'The 3rd Birthday' }] } : { data: [{ url: 'https://x/a.png', score: 1, width: 1920 }, { url: 'https://x/b.png', score: 5, width: 3840 }, { url: 'https://x/c.png', score: 9, width: 1600 }] } });
   assert.strictEqual((await sgdbHero('The 3rd Birthday', 'k', { fetch: sg })).url, 'https://x/b.png');
   assert.strictEqual(await sgdbHero('x', '', { fetch: sg }), null);
   // titre régional différent : trouvé par la recherche plein texte

@@ -363,9 +363,20 @@ void App::setVolume(int v) {
 
 // ───────────────────────────── Entrées ─────────────────────────────
 static void RETRO_CALLCONV inputPollCb() {
+  if (g_app.ctlWatch.Changed()) ArcadiaControls::Load(g_app.ctlWatch.path, g_app.controls); // réglé depuis Arcadia ou un autre moteur
   for (int p = 0; p < 4; p++) {
     uint16_t m = 0; SDL_Gamepad* g = g_app.pads[p];
+    namespace AC = ArcadiaControls;
+    const bool custom = p == 0 && g_app.controls.loaded;
+    if (custom && g_app.controls.device == AC::KEYBOARD) g = nullptr; // clavier seul
     if (g && !g_app.menuOpen) {
+    if (custom) { // joueur 1 : touches réattribuées
+      static const int kRetro[AC::HOME] = { RETRO_DEVICE_ID_JOYPAD_A, RETRO_DEVICE_ID_JOYPAD_B, RETRO_DEVICE_ID_JOYPAD_X, RETRO_DEVICE_ID_JOYPAD_Y,
+        RETRO_DEVICE_ID_JOYPAD_L, RETRO_DEVICE_ID_JOYPAD_R, RETRO_DEVICE_ID_JOYPAD_L2, RETRO_DEVICE_ID_JOYPAD_R2, RETRO_DEVICE_ID_JOYPAD_START,
+        RETRO_DEVICE_ID_JOYPAD_SELECT, RETRO_DEVICE_ID_JOYPAD_L3, RETRO_DEVICE_ID_JOYPAD_R3, RETRO_DEVICE_ID_JOYPAD_UP, RETRO_DEVICE_ID_JOYPAD_DOWN,
+        RETRO_DEVICE_ID_JOYPAD_LEFT, RETRO_DEVICE_ID_JOYPAD_RIGHT };
+      for (int a = 0; a < AC::HOME; a++) for (int c : g_app.controls.pad[a]) if (AC::PadDown(g, c)) m |= 1 << kRetro[a];
+    } else {
       auto b = [&](SDL_GamepadButton sb, int id) { if (SDL_GetGamepadButton(g, sb)) m |= 1 << id; };
       b(SDL_GAMEPAD_BUTTON_SOUTH, RETRO_DEVICE_ID_JOYPAD_B); b(SDL_GAMEPAD_BUTTON_EAST, RETRO_DEVICE_ID_JOYPAD_A);
       b(SDL_GAMEPAD_BUTTON_WEST, RETRO_DEVICE_ID_JOYPAD_Y); b(SDL_GAMEPAD_BUTTON_NORTH, RETRO_DEVICE_ID_JOYPAD_X);
@@ -376,6 +387,7 @@ static void RETRO_CALLCONV inputPollCb() {
       b(SDL_GAMEPAD_BUTTON_LEFT_STICK, RETRO_DEVICE_ID_JOYPAD_L3); b(SDL_GAMEPAD_BUTTON_RIGHT_STICK, RETRO_DEVICE_ID_JOYPAD_R3);
       if (SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 12000) m |= 1 << RETRO_DEVICE_ID_JOYPAD_L2;
       if (SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 12000) m |= 1 << RETRO_DEVICE_ID_JOYPAD_R2;
+    }
       float dz = g_app.cfg.geti("deadzone", 15) / 100.f;
       for (int s = 0; s < 2; s++) {
         float x = SDL_GetGamepadAxis(g, s ? SDL_GAMEPAD_AXIS_RIGHTX : SDL_GAMEPAD_AXIS_LEFTX) / 32767.f;
@@ -387,8 +399,31 @@ static void RETRO_CALLCONV inputPollCb() {
       }
       g_app.padAxis[p][4] = SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFT_TRIGGER);
       g_app.padAxis[p][5] = SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER);
+      if (custom && g_app.controls.device == AC::STICK) { // stick arcade : le levier (croix) pilote aussi le stick gauche
+        int sx = (SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_DPAD_RIGHT) ? 1 : 0) - (SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_DPAD_LEFT) ? 1 : 0);
+        int sy = (SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_DPAD_DOWN) ? 1 : 0) - (SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_DPAD_UP) ? 1 : 0);
+        if (sx || sy) { g_app.padAxis[p][0] = (int16_t)(sx * 32767); g_app.padAxis[p][1] = (int16_t)(sy * 32767); }
+      }
     } else { memset(g_app.padAxis[p], 0, sizeof g_app.padAxis[p]); }
-    if (p == 0 && !g_app.menuOpen) { // clavier → joueur 1
+    if (p == 0 && !g_app.menuOpen && custom) { // clavier réattribué → joueur 1
+      if (g_app.controls.device == AC::BOTH || g_app.controls.device == AC::KEYBOARD) {
+        int nk = 0; const bool* k = SDL_GetKeyboardState(&nk);
+        static const int kRetro[AC::HOME] = { RETRO_DEVICE_ID_JOYPAD_A, RETRO_DEVICE_ID_JOYPAD_B, RETRO_DEVICE_ID_JOYPAD_X, RETRO_DEVICE_ID_JOYPAD_Y,
+          RETRO_DEVICE_ID_JOYPAD_L, RETRO_DEVICE_ID_JOYPAD_R, RETRO_DEVICE_ID_JOYPAD_L2, RETRO_DEVICE_ID_JOYPAD_R2, RETRO_DEVICE_ID_JOYPAD_START,
+          RETRO_DEVICE_ID_JOYPAD_SELECT, RETRO_DEVICE_ID_JOYPAD_L3, RETRO_DEVICE_ID_JOYPAD_R3, RETRO_DEVICE_ID_JOYPAD_UP, RETRO_DEVICE_ID_JOYPAD_DOWN,
+          RETRO_DEVICE_ID_JOYPAD_LEFT, RETRO_DEVICE_ID_JOYPAD_RIGHT };
+        for (int a = 0; a < AC::HOME; a++) for (int sc : g_app.controls.kb[a]) if (AC::KeyDown(k, nk, sc)) m |= 1 << kRetro[a];
+        // sticks au clavier : la direction tenue l'emporte sur le stick de la manette
+        for (int st = 0; st < 2; st++) {
+          int base = st ? AC::RS_UP : AC::LS_UP; int kx = 0, ky = 0;
+          for (int sc : g_app.controls.kb[base + 3]) if (AC::KeyDown(k, nk, sc)) kx++;
+          for (int sc : g_app.controls.kb[base + 2]) if (AC::KeyDown(k, nk, sc)) kx--;
+          for (int sc : g_app.controls.kb[base + 1]) if (AC::KeyDown(k, nk, sc)) ky++;
+          for (int sc : g_app.controls.kb[base + 0]) if (AC::KeyDown(k, nk, sc)) ky--;
+          if (kx || ky) { float n = std::sqrt((float)(kx * kx + ky * ky)); g_app.padAxis[0][st * 2] = (int16_t)(kx / n * 32767); g_app.padAxis[0][st * 2 + 1] = (int16_t)(ky / n * 32767); }
+        }
+      }
+    } else if (p == 0 && !g_app.menuOpen) { // clavier → joueur 1
       const bool* k = SDL_GetKeyboardState(nullptr);
       auto kb = [&](SDL_Scancode sc, int id) { if (k[sc]) m |= 1 << id; };
       kb(SDL_SCANCODE_UP, RETRO_DEVICE_ID_JOYPAD_UP); kb(SDL_SCANCODE_DOWN, RETRO_DEVICE_ID_JOYPAD_DOWN);
@@ -630,6 +665,30 @@ static void guideCombo(SDL_GamepadButton b) {
   }
 }
 
+// Menu « Contrôles » : la prochaine touche ou le prochain bouton est attribué à l'action choisie
+static bool captureEvent(const SDL_Event& e) {
+  if (g_app.capAction < 0) return false;
+  if (SDL_GetTicks() - g_app.capT0 < 250) return e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN; // le clic qui a lancé la capture
+  int code = -1; bool kb = false;
+  if (e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat) {
+    if (e.key.scancode == SDL_SCANCODE_ESCAPE) { g_app.capAction = -1; g_app.toast("Réattribution annulée", 1200); return true; }
+    if (!g_app.capKeyboard) return true;
+    code = e.key.scancode; kb = true;
+  } else if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN && e.gbutton.button != SDL_GAMEPAD_BUTTON_GUIDE) {
+    if (g_app.capKeyboard) return true;
+    code = e.gbutton.button;
+  } else if (e.type == SDL_EVENT_GAMEPAD_AXIS_MOTION && !g_app.capKeyboard && e.gaxis.value > 20000 &&
+             (e.gaxis.axis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER || e.gaxis.axis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER)) {
+    code = e.gaxis.axis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER ? ArcadiaControls::PAD_LT : ArcadiaControls::PAD_RT;
+  } else return e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN || e.type == SDL_EVENT_GAMEPAD_AXIS_MOTION;
+  ArcadiaControls::Assign(g_app.controls, kb, g_app.capAction, code);
+  g_app.controls.loaded = true;
+  if (!g_app.ctlWatch.path.empty()) { ArcadiaControls::Save(g_app.ctlWatch.path, g_app.controls); g_app.ctlWatch.Touch(); }
+  g_app.toast(std::string(ArcadiaControls::kActionNames[g_app.capAction]) + " \xE2\x86\x92 " + (kb ? ArcadiaControls::KeyLabel(code) : ArcadiaControls::PadLabel(code)), 1500);
+  g_app.capAction = -1;
+  return true;
+}
+
 static void handleEvent(SDL_Event& e) {
   switch (e.type) {
   case SDL_EVENT_QUIT: g_app.quit(); break;
@@ -722,8 +781,10 @@ int main(int argc, char** argv) {
   // manettes calibrées dans Arcadia + manette préférée en joueur 1
   { std::string db = argOf(argc, argv, "--pad-db"); g_app.padDb = db; if (!db.empty()) SDL_AddGamepadMappingsFromFile(db.c_str()); }
   g_app.padLayout = argOf(argc, argv, "--pad-layout", "xbox");
-  if (hasArg(argc, argv, "--no-hint")) g_app.hintT0 = 1; // aide des contrôles désactivée dans Arcadia
+  if (hasArg(argc, argv, "--no-hint")) g_app.hintOff = true; // aide des contrôles désactivée dans Arcadia
   g_padFirst = argOf(argc, argv, "--pad-first");
+  g_app.ctlWatch.path = argOf(argc, argv, "--controls");
+  if (!g_app.ctlWatch.path.empty()) { ArcadiaControls::Load(g_app.ctlWatch.path, g_app.controls); g_app.ctlWatch.Touch(); }
 
   std::string err;
   if (!g_core.open(g_app.corePath, err)) return fail(err);
@@ -756,6 +817,24 @@ int main(int argc, char** argv) {
   }
   if (!g_core.load_game(g_app.gamePath.empty() ? nullptr : &gi)) return fail("Le cœur n'a pas réussi à charger ce jeu.");
   g_core.gameLoaded = true;
+  // Patchs d'Arcadia (60 images/s…) : une ligne = un code (lignes « a+b+c » du format libretro), activé au démarrage
+  {
+    std::string cf = argOf(argc, argv, "--cheats");
+    size_t sz = 0; char* txt = cf.empty() ? nullptr : (char*)SDL_LoadFile(cf.c_str(), &sz);
+    if (txt && g_core.cheat_set) {
+      if (g_core.cheat_reset) g_core.cheat_reset();
+      unsigned idx = 0; std::string line;
+      for (size_t i = 0; i <= sz; i++) {
+        char c = i < sz ? txt[i] : '\n';
+        if (c == '\r') continue;
+        if (c != '\n') { line += c; continue; }
+        if (!line.empty() && line[0] != '#') { g_core.cheat_set(idx++, true, line.c_str()); }
+        line.clear();
+      }
+      emit(std::string("{\"event\":\"cheats\",\"count\":") + std::to_string(idx) + "}");
+    }
+    if (txt) SDL_free(txt);
+  }
   g_core.get_system_av_info(&g_core.av);
   if (g_core.hwRender) { ensureGameFbo(); if (g_core.hw.context_reset) g_core.hw.context_reset(); }
   g_core.set_controller_port_device(0, RETRO_DEVICE_JOYPAD);
@@ -781,7 +860,7 @@ int main(int argc, char** argv) {
   uint64_t next = SDL_GetTicksNS(); g_app.fpsT0 = SDL_GetTicks();
   while (g_app.running) {
     SDL_Event e;
-    while (SDL_PollEvent(&e)) { extern bool uiProcessEvent(const SDL_Event&); uiProcessEvent(e); handleEvent(e); }
+    while (SDL_PollEvent(&e)) { extern bool uiProcessEvent(const SDL_Event&); if (captureEvent(e)) continue; uiProcessEvent(e); handleEvent(e); }
     // Back+Start maintenus 1,5 s : quitter
     if (g_app.comboT0 && SDL_GetTicks() - g_app.comboT0 > 1500) { g_app.comboT0 = 0; g_app.quit(); }
     if (g_app.wantQuit) break;
@@ -804,7 +883,11 @@ int main(int argc, char** argv) {
       g_app.playedNs += ran * frameNs;
     } else next = now;
     if (!g_app.menuOpen && !g_app.resumePrompt && !g_app.windowed && SDL_CursorVisible() && SDL_GetTicks() - g_app.lastMouseMove > 2000) SDL_HideCursor();
-    if (SDL_GetTicks() - g_app.fpsT0 >= 500) { g_app.fps = g_app.fpsFrames * 1000.f / (SDL_GetTicks() - g_app.fpsT0); g_app.fpsFrames = 0; g_app.fpsT0 = SDL_GetTicks(); }
+    if (SDL_GetTicks() - g_app.fpsT0 >= 500) {
+      g_app.fps = g_app.fpsFrames * 1000.f / (SDL_GetTicks() - g_app.fpsT0); g_app.fpsFrames = 0; g_app.fpsT0 = SDL_GetTicks();
+      static const char* stats = SDL_getenv("ARCADIA_STATS"); // compteur d'images/s d'Arcadia (par-dessus le jeu)
+      if (stats && *stats) if (SDL_IOStream* f = SDL_IOFromFile(stats, "wb")) { SDL_IOprintf(f, "{\"fps\":%.1f,\"speed\":%.0f,\"t\":%llu}", g_app.fps, g_app.speed * 100.0, (unsigned long long)SDL_GetTicks()); SDL_CloseIO(f); }
+    }
 
     // Dessin
     resetGlState();
