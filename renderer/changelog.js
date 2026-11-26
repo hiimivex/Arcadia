@@ -2,6 +2,24 @@
 // type : add = ajout, change = modification, fix = correctif
 const CHANGELOG = [
   {
+    v: '1.28.0', date: '2026-11-26',
+    items: [
+      ['change', 'Plus de bascule silencieuse vers un autre moteur : si le moteur Arcadia s\'arrête au lancement d\'un jeu, tu choisis entre réessayer, utiliser le moteur de secours ou créer un rapport.', 'No more silent switch to another engine: if the Arcadia engine stops when a game starts, you choose between trying again, using the fallback engine or creating a report.'],
+      ['add', 'Salon Mario Kart 8 Deluxe : Arcadia autorise lui-même le salon dans le pare-feu Windows (une seule demande d\'autorisation, la première fois).', 'Mario Kart 8 Deluxe room: Arcadia allows the room in the Windows firewall itself (one permission prompt, the first time).'],
+      ['change', 'Port de la box ouvert pour 5 minutes renouvelées tant que le salon est ouvert, puis refermé ; un port resté ouvert après un arrêt brutal est refermé au lancement suivant.', 'Router port opened for 5 minutes, renewed while the room is open, then closed; a port left open after a crash is closed on the next launch.'],
+      ['change', 'Émulateurs installés par Arcadia : versions figées (les mêmes sur tous les PC) et fichiers vérifiés par empreinte avant installation.', 'Emulators installed by Arcadia: pinned versions (the same on every PC) and files checked by checksum before installing.'],
+      ['add', 'Rapport (« Créer un rapport ») plus complet : moteurs réellement présents avec leur empreinte, processeur, carte graphique, pare-feu et choix de moteur de secours, pour comparer deux PC.', 'More complete report ("Create a report"): engines actually present with their checksum, processor, graphics card, firewall and fallback choices, to compare two PCs.'],
+      ['add', 'Vérification du processeur avant le moteur Switch, avec un message clair s\'il n\'est pas compatible.', 'Processor check before the Switch engine, with a clear message if it isn\'t compatible.']
+    ]
+  },
+  {
+    v: '1.27.1', date: '2026-11-26',
+    items: [
+      ['fix', 'Mario Kart 8 Deluxe en ligne : quand la connexion au salon échouait, Arcadia croyait à un plantage du moteur et relançait le jeu dans Lichii (sans le salon ni la manette PS4). Désormais, un message explique ce qui bloque et le moteur Switch d\'Arcadia reste utilisé.', 'Mario Kart 8 Deluxe online: when joining the room failed, Arcadia mistook it for an engine crash and relaunched the game in Lichii (without the room or the PS4 controller). Now a message explains what\'s wrong and Arcadia\'s Switch engine stays in use.'],
+      ['add', 'Avant de rejoindre, Arcadia vérifie que le salon de ton ami répond, et te dit quoi faire sinon (salon fermé, port de la box, pare-feu Windows).', 'Before joining, Arcadia checks that your friend\'s room answers, and tells you what to do if not (room closed, router port, Windows firewall).']
+    ]
+  },
+  {
     v: '1.27.0', date: '2026-11-26',
     items: [
       ['add', 'Mario Kart 8 Deluxe en ligne entre amis : bouton « 🌐 En ligne » sur la page du jeu. Un ami héberge un salon privé (gratuit, sans compte, sans serveur), les autres le rejoignent avec un code d\'invitation. Même Wi-Fi ou par Internet (ouverture automatique du port de la box quand elle le permet). Dans le jeu : « Sans fil local ».', 'Mario Kart 8 Deluxe online with friends: "🌐 Online" button on the game page. One friend hosts a private room (free, no account, no server), the others join with an invite code. Same Wi-Fi or over the Internet (router port opened automatically when possible). In the game: "Local Wireless Play".'],

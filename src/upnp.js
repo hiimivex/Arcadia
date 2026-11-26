@@ -48,16 +48,30 @@ async function soap(fetch, gw, action, args) {
 }
 
 // Ouvre port/protocole vers ce PC ; renvoie { ok, close() }
-async function openPort({ fetch, port, protocol = 'UDP', localIp, description = 'Arcadia', lease = 0 }) {
+// Bail court (5 min) renouvelé tant que le salon est ouvert : si Arcadia s'arrête net, la box referme le port d'elle-même.
+// Seules les box qui refusent un bail limité reçoivent une ouverture sans limite (refermée à la fin du salon, ou au lancement suivant).
+const LEASE = 300;
+async function openPort({ fetch, port, protocol = 'UDP', localIp, description = 'Arcadia' }) {
   try {
     const gw = await gateway(fetch);
     if (!gw) return { ok: false, error: 'box sans UPnP (ou UPnP désactivé)' };
-    const args = { NewRemoteHost: '', NewExternalPort: port, NewProtocol: protocol, NewInternalPort: port, NewInternalClient: localIp, NewEnabled: 1, NewPortMappingDescription: description, NewLeaseDuration: lease };
+    const args = { NewRemoteHost: '', NewExternalPort: port, NewProtocol: protocol, NewInternalPort: port, NewInternalClient: localIp, NewEnabled: 1, NewPortMappingDescription: description, NewLeaseDuration: LEASE };
+    let lease = LEASE;
     try { await soap(fetch, gw, 'AddPortMapping', args); }
-    catch (e) { if (lease === 0) await soap(fetch, gw, 'AddPortMapping', { ...args, NewLeaseDuration: 7200 }); else throw e; } // certaines box refusent un bail illimité
+    catch { lease = 0; await soap(fetch, gw, 'AddPortMapping', { ...args, NewLeaseDuration: 0 }); }
     let ext = null; try { ext = /<NewExternalIPAddress>([^<]*)</i.exec(await soap(fetch, gw, 'GetExternalIPAddress', {}))?.[1] || null; } catch { /* */ }
-    return { ok: true, externalIp: ext, close: () => soap(fetch, gw, 'DeletePortMapping', { NewRemoteHost: '', NewExternalPort: port, NewProtocol: protocol }).catch(() => {}) };
+    const timer = lease ? setInterval(() => soap(fetch, gw, 'AddPortMapping', args).catch(() => {}), (LEASE - 60) * 1000) : null;
+    return {
+      ok: true, externalIp: ext, lease, gateway: gw,
+      close: () => { if (timer) clearInterval(timer); return soap(fetch, gw, 'DeletePortMapping', { NewRemoteHost: '', NewExternalPort: port, NewProtocol: protocol }).then(() => true, () => false); }
+    };
   } catch (e) { return { ok: false, error: e.message }; }
 }
+// Port resté ouvert après un arrêt brutal d'Arcadia : refermé au lancement suivant
+async function closePort({ fetch, port, protocol = 'UDP' }) {
+  const gw = await gateway(fetch).catch(() => null);
+  if (!gw) return false;
+  return soap(fetch, gw, 'DeletePortMapping', { NewRemoteHost: '', NewExternalPort: port, NewProtocol: protocol }).then(() => true, () => false);
+}
 
-module.exports = { openPort, discover };
+module.exports = { openPort, closePort, discover };

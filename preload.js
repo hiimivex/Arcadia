@@ -86,6 +86,8 @@ contextBridge.exposeInMainWorld('arcadia', {
   swnetPlay: (id, code) => ipcRenderer.invoke('swnet:play', id, code),
   swnetStop: () => ipcRenderer.invoke('swnet:stop'),
   setSwitchProfile: name => ipcRenderer.invoke('switch:profileName', name),
+  useFallback: id => ipcRenderer.invoke('game:useFallback', id),
+  onEngineCrash: cb => ipcRenderer.on('game:engineCrash', (_e, d) => cb(d)),
   setFullscreen: on2 => ipcRenderer.invoke('app:setFullscreen', on2),
   gameSettings: (id, patch) => ipcRenderer.invoke('game:settings', id, patch),
   gameEmulators: id => ipcRenderer.invoke('game:emulators', id),

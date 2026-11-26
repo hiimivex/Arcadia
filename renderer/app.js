@@ -1621,6 +1621,22 @@ function pickLanguage() {
   if (S.settings.bigPictureOnStart) bpOpen();
 })();
 // Écran de mise à jour : l'interface se dissout en pixels, puis Arcadia redémarre
+// ------------------------------------------------------------ moteur Arcadia arrêté au démarrage : au joueur de choisir
+arcadia.onEngineCrash(d => {
+  running.delete(d.id); renderAll();
+  openModal(c => {
+    c.classList.add('fr-modal');
+    c.append(el('div', 'fr-tag', '// moteur arrêté'), el('h2', '', `${d.title} : le moteur Arcadia s'est arrêté`));
+    c.append(el('p', '', 'Il s\'est fermé juste après le lancement. Ça peut venir du jeu, des fichiers système (clés, firmware) ou de la carte graphique.'));
+    if (d.code != null) c.append(el('p', 'muted small', `Code de sortie : ${d.code}`));
+    const a = el('div', 'modal-actions');
+    const rep = el('button', 'btn-ghost', 'Créer un rapport'); rep.onclick = () => makeReport();
+    const fb = el('button', 'btn-ghost', `Utiliser ${d.backup}`); fb.onclick = async () => { closeModal(); const r = await arcadia.useFallback(d.id); if (r && !r.ok && r.error) toast(r.error, true); };
+    const again = el('button', 'btn-white', 'Réessayer'); again.onclick = () => { closeModal(); play(d.id, { skipResume: true }); };
+    a.append(rep, fb, again); c.append(a);
+    c.append(el('p', 'muted small', `${d.backup} n'utilise pas les réglages d'Arcadia (manette, menu Échap, en ligne) : ton choix vaut pour ce jeu jusqu'à la prochaine version d'Arcadia.`));
+  }, true);
+});
 // ------------------------------------------------------------ nom du profil de joueur Switch (au lieu de « Eden »)
 async function askSwitchProfile(g, force) {
   if (!g || (g.console !== 'SWITCH' && g.console !== 'SWITCH 2')) return true;
@@ -1654,7 +1670,7 @@ function onlineModal(g) {
     const zone = el('div', 'net-zone'); c.append(zone);
     const a = el('div', 'modal-actions'); const close = el('button', 'btn-ghost', 'Fermer'); close.onclick = () => closeModal(); a.append(close); c.append(a);
     hb.onclick = async () => {
-      hb.disabled = jb.disabled = true; zone.replaceChildren(el('p', 'muted', 'Ouverture du salon…'));
+      hb.disabled = jb.disabled = true; zone.replaceChildren(el('p', 'muted', 'Ouverture du salon… La première fois, Windows demande une autorisation pour son pare-feu : accepte (« Oui »).'));
       const r = await arcadia.swnetHost(g.id).catch(e => ({ ok: false, error: e.message }));
       hb.disabled = jb.disabled = false;
       if (!r.ok) { zone.replaceChildren(el('p', 'net-err', r.error)); return; }
@@ -1663,7 +1679,7 @@ function onlineModal(g) {
       const reach = el('div', 'net-reach');
       reach.append(el('div', 'ok', `✓ Même Wi-Fi / même box : tes amis te rejoignent directement (${r.lan || 'réseau local'}).`));
       reach.append(r.upnp ? el('div', 'ok', '✓ Par Internet : ta box a ouvert le port toute seule.') : el('div', 'warn', `⚠ Par Internet : ta box n'a pas ouvert le port toute seule. Dans l'interface de ta box, redirige le port UDP ${r.port} vers ce PC (${r.lan || '?'}). Ce n'est pas nécessaire pour jouer à plusieurs chez toi.`));
-      reach.append(el('div', 'muted small', 'Si Windows demande d\'autoriser « arcadia-room » sur le réseau, accepte.'));
+      reach.append(r.firewall === 'ok' ? el('div', 'ok', '✓ Pare-feu Windows : le salon est autorisé.') : el('div', 'warn', '⚠ Pare-feu Windows : autorisation refusée. Tes amis risquent d\'être bloqués : héberge à nouveau et accepte la demande de Windows.'));
       const go = el('button', 'btn-white', '▶ Lancer Mario Kart');
       go.onclick = async () => { go.disabled = true; const x = await arcadia.swnetPlay(g.id).catch(e => ({ ok: false, error: e.message })); go.disabled = false; if (x.ok) closeModal(); else toast(x.error, true); };
       const stop = el('button', 'btn-ghost', 'Fermer le salon'); stop.onclick = async () => { await arcadia.swnetStop(); zone.replaceChildren(el('p', 'muted', 'Salon fermé.')); };

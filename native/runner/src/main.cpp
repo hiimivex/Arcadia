@@ -753,6 +753,11 @@ static int fail(const std::string& msg) {
 
 int main(int argc, char** argv) {
   if (hasArg(argc, argv, "--calibrate")) return runCalibration(argc, argv);
+  if (hasArg(argc, argv, "--cpuinfo")) { // diagnostic : jeux d'instructions du processeur
+    printf("{\"sse42\":%s,\"avx\":%s,\"avx2\":%s,\"avx512\":%s,\"cores\":%d,\"ramMb\":%d}\n", SDL_HasSSE42() ? "true" : "false", SDL_HasAVX() ? "true" : "false",
+           SDL_HasAVX2() ? "true" : "false", SDL_HasAVX512F() ? "true" : "false", SDL_GetNumLogicalCPUCores(), SDL_GetSystemRAM());
+    fflush(stdout); return 0;
+  }
   const char* base = SDL_GetBasePath(); std::string exeDir = base ? base : "./";
   g_app.corePath = argOf(argc, argv, "--core"); g_app.gamePath = argOf(argc, argv, "--game");
   g_app.title = argOf(argc, argv, "--title", "Jeu"); g_app.console = argOf(argc, argv, "--console", "");
