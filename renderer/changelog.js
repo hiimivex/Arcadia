@@ -2,6 +2,15 @@
 // type : add = ajout, change = modification, fix = correctif
 const CHANGELOG = [
   {
+    v: '1.28.2', date: '2026-11-26',
+    items: [
+      ['fix', 'Mario Kart 8 Deluxe en ligne : quand ton ami et toi aviez des box avec les mêmes adresses (192.168.1.x, très courant), Arcadia croyait que vous étiez sur le même réseau et ne tentait pas Internet. Il teste maintenant les deux routes et prend celle qui répond.', 'Mario Kart 8 Deluxe online: when you and your friend had routers with the same addresses (192.168.1.x, very common), Arcadia thought you were on the same network and didn\'t try the Internet. It now tests both routes and uses the one that answers.'],
+      ['fix', 'Mises à jour : les releases GitHub marquées « pre-release » n\'étaient pas vues par Arcadia. Elles le sont maintenant.', 'Updates: GitHub releases marked "pre-release" weren\'t seen by Arcadia. Now they are.'],
+      ['add', 'Ouverture automatique du port : si la box ne répond pas en UPnP, Arcadia essaie NAT-PMP ; le pare-feu Windows laisse aussi passer les réponses de la box (réseau local seulement). La raison exacte d\'un échec est affichée.', 'Automatic port opening: if the router doesn\'t answer UPnP, Arcadia tries NAT-PMP; the Windows firewall also lets the router\'s answers through (local network only). The exact reason for a failure is shown.'],
+      ['add', 'Fenêtre « Héberger » : prévient quand ta connexion (box 4G/5G, double box) ne permet pas d\'être rejoint par Internet, et conseille de laisser ton ami héberger.', '"Host" window: warns when your connection (4G/5G box, double router) can\'t be reached over the Internet, and suggests letting your friend host.']
+    ]
+  },
+  {
     v: '1.28.0', date: '2026-11-26',
     items: [
       ['change', 'Plus de bascule silencieuse vers un autre moteur : si le moteur Arcadia s\'arrête au lancement d\'un jeu, tu choisis entre réessayer, utiliser le moteur de secours ou créer un rapport.', 'No more silent switch to another engine: if the Arcadia engine stops when a game starts, you choose between trying again, using the fallback engine or creating a report.'],

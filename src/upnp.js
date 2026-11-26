@@ -74,4 +74,27 @@ async function closePort({ fetch, port, protocol = 'UDP' }) {
   return soap(fetch, gw, 'DeletePortMapping', { NewRemoteHost: '', NewExternalPort: port, NewProtocol: protocol }).then(() => true, () => false);
 }
 
-module.exports = { openPort, closePort, discover };
+// NAT-PMP (RFC 6886) : autre façon d'ouvrir un port, utilisée par des box qui n'ont pas UPnP
+function natpmp(gateway, { port, protocol = 'UDP', lifetime }) {
+  return new Promise(resolve => {
+    const sock = dgram.createSocket('udp4'); let done = false;
+    const end = v => { if (done) return; done = true; try { sock.close(); } catch { /* */ } resolve(v); };
+    sock.on('message', m => {
+      if (m.length >= 16 && m[1] === (protocol === 'UDP' ? 129 : 130)) end(m.readUInt16BE(2) === 0 ? { ok: true, external: m.readUInt16BE(10), lifetime: m.readUInt32BE(12) } : { ok: false, error: `NAT-PMP code ${m.readUInt16BE(2)}` });
+    });
+    sock.on('error', e => end({ ok: false, error: e.message }));
+    const b = Buffer.alloc(12); b[0] = 0; b[1] = protocol === 'UDP' ? 1 : 2; b.writeUInt16BE(port, 4); b.writeUInt16BE(port, 6); b.writeUInt32BE(lifetime, 8);
+    const send = () => { if (!done) sock.send(b, 5351, gateway, () => {}); };
+    send(); setTimeout(send, 400); setTimeout(send, 1200);
+    setTimeout(() => end({ ok: false, error: 'pas de NAT-PMP' }), 2500);
+  });
+}
+async function openPortPmp({ gateway, port, protocol = 'UDP' }) {
+  if (!gateway) return { ok: false, error: 'passerelle inconnue' };
+  const r = await natpmp(gateway, { port, protocol, lifetime: LEASE });
+  if (!r.ok) return r;
+  const timer = setInterval(() => natpmp(gateway, { port, protocol, lifetime: LEASE }), (LEASE - 60) * 1000);
+  return { ok: true, lease: LEASE, via: 'NAT-PMP', externalIp: null, close: async () => { clearInterval(timer); const x = await natpmp(gateway, { port, protocol, lifetime: 0 }); return !!x.ok; } };
+}
+
+module.exports = { openPort, openPortPmp, closePort, discover };

@@ -1,7 +1,7 @@
 {
   "name": "arcadia",
   "productName": "Arcadia",
-  "version": "1.28.0",
+  "version": "1.28.2",
   "description": "Arcadia — bibliothèque de jeux façon Steam pour émulateurs",
   "main": "main.js",
   "license": "GPL-3.0-or-later",

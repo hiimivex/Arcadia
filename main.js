@@ -755,10 +755,14 @@ async function checkGithubUpdate(manual) {
   if (!manual && settings().autoUpdate === false) return { ok: false, error: 'désactivé' };
   ghBusy = true;
   try {
-    const r = await net.fetch(TEST_API || `https://api.github.com/repos/${GH_REPO}/releases/latest`, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Arcadia' } });
+    // toutes les releases publiées (y compris « pre-release ») : la plus haute version gagne
+    const r = await net.fetch(TEST_API || `https://api.github.com/repos/${GH_REPO}/releases?per_page=20`, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Arcadia' } });
     if (r.status === 404) return { ok: true, latest: app.getVersion(), upToDate: true }; // aucune release publiée
     if (!r.ok) throw new Error(`GitHub HTTP ${r.status}`);
-    const rel = await r.json();
+    const body = await r.json();
+    const vOf = x => String(x.tag_name || '').replace(/^v/i, '');
+    const rel = (Array.isArray(body) ? body : [body]).filter(x => x && !x.draft && /^\d+\.\d+\.\d+$/.test(vOf(x))).sort((a, b) => verNum(vOf(b)) - verNum(vOf(a)))[0];
+    if (!rel) return { ok: true, latest: app.getVersion(), upToDate: true };
     const version = String(rel.tag_name || '').replace(/^v/i, '');
     if (!/^\d+\.\d+\.\d+$/.test(version) || verNum(version) <= verNum(app.getVersion())) return { ok: true, latest: version || app.getVersion(), upToDate: true };
     const asset = (rel.assets || []).find(a => new RegExp(`^Arcadia-Setup-${version.replace(/\./g, '\\.')}\\.exe$`, 'i').test(a.name));
@@ -2367,17 +2371,29 @@ setTimeout(() => {
   });
 }, 8000);
 app.on('will-quit', swnetStop);
+// Passerelle par défaut (la box), lue dans la table de routage Windows
+function defaultGateway() {
+  try {
+    if (process.platform !== 'win32') return null;
+    const out = require('child_process').spawnSync('route', ['print', '-4', '0.0.0.0'], { encoding: 'utf8', windowsHide: true }).stdout || '';
+    const m = /^\s*0\.0\.0\.0\s+0\.0\.0\.0\s+(\d+\.\d+\.\d+\.\d+)\s/m.exec(out);
+    return m ? m[1] : null;
+  } catch { return null; }
+}
 // Pare-feu Windows : règle entrante pour le serveur de salon (une seule autorisation administrateur, la première fois)
 const FW_RULE = 'Arcadia salon Switch';
 function fwRuleOk(exe) {
   if (process.platform !== 'win32') return true;
   const r = require('child_process').spawnSync('netsh', ['advfirewall', 'firewall', 'show', 'rule', `name=${FW_RULE}`, 'verbose'], { encoding: 'utf8', windowsHide: true });
-  return r.status === 0 && String(r.stdout || '').toLowerCase().includes(exe.toLowerCase());
+  const box = require('child_process').spawnSync('netsh', ['advfirewall', 'firewall', 'show', 'rule', `name=${FW_RULE} (box)`], { encoding: 'utf8', windowsHide: true });
+  return r.status === 0 && String(r.stdout || '').toLowerCase().includes(exe.toLowerCase()) && box.status === 0;
 }
 function fwRuleAdd(exe) {
   return new Promise(resolve => {
     const q = s => s.replace(/'/g, "''");
-    const cmdline = `/c netsh advfirewall firewall delete rule name="${FW_RULE}" & netsh advfirewall firewall add rule name="${FW_RULE}" dir=in action=allow program="${exe}" protocol=UDP localport=${SW_ROOM_PORT} profile=any enable=yes`;
+    const self = app.getPath('exe');
+    const cmdline = `/c netsh advfirewall firewall delete rule name="${FW_RULE}" & netsh advfirewall firewall add rule name="${FW_RULE}" dir=in action=allow program="${exe}" protocol=UDP localport=${SW_ROOM_PORT} profile=any enable=yes`
+      + ` & netsh advfirewall firewall delete rule name="${FW_RULE} (box)" & netsh advfirewall firewall add rule name="${FW_RULE} (box)" dir=in action=allow program="${self}" protocol=UDP remoteip=LocalSubnet profile=any enable=yes`;
     const ps = `Start-Process -FilePath cmd.exe -ArgumentList '${q(cmdline)}' -Verb RunAs -WindowStyle Hidden -Wait`;
     const ch = require('child_process').spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { windowsHide: true, stdio: 'ignore' });
     ch.on('exit', () => resolve(fwRuleOk(exe))); ch.on('error', () => resolve(false));
@@ -2407,11 +2423,19 @@ ipcMain.handle('swnet:host', async (_e, id) => {
   if (!SWNET.room) return { ok: false, error: `Le salon n'a pas pu s'ouvrir (port ${SWNET.port} déjà pris ?).` };
   const lan = mainLanIp();
   SWNET.upnp = lan ? await UPnP.openPort({ fetch: (u, o) => net.fetch(u, o), port: SWNET.port, protocol: 'UDP', localIp: lan, description: 'Arcadia - salon Switch' }) : { ok: false, error: 'pas de réseau local' };
+  if (!SWNET.upnp.ok && lan) { // pas d'UPnP : on tente NAT-PMP auprès de la box
+    const viaPmp = await UPnP.openPortPmp({ gateway: defaultGateway(), port: SWNET.port, protocol: 'UDP' });
+    log?.write('MULTI', `UPnP : ${SWNET.upnp.error} ; NAT-PMP : ${viaPmp.ok ? 'ok' : viaPmp.error}`);
+    if (viaPmp.ok) SWNET.upnp = viaPmp; else SWNET.upnp.error = `UPnP : ${SWNET.upnp.error} · NAT-PMP : ${viaPmp.error}`;
+  }
   if (SWNET.upnp.ok) { store.data.upnpOpen = { port: SWNET.port, protocol: 'UDP', at: Date.now(), lease: SWNET.upnp.lease }; store.save(); }
   const pub = (SWNET.upnp.ok && SWNET.upnp.externalIp && !isPrivateIp(SWNET.upnp.externalIp) ? SWNET.upnp.externalIp : null) || await publicIp();
+  // box derrière une autre box ou adresse partagée de l'opérateur (CGNAT, fréquent en 4G/5G) : impossible d'héberger par Internet
+  const ext = SWNET.upnp.ok ? SWNET.upnp.externalIp : null;
+  const cgnat = !!ext && (isPrivateIp(ext) || /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(ext) || (pub && ext !== pub));
   SWNET.code = Invite.encode({ publicIp: pub, lanIp: lan, port: SWNET.port, password: SWNET.password });
   log?.write('MULTI', `salon Switch ouvert pour ${title} · LAN ${lan} · public ${pub} · UPnP ${SWNET.upnp.ok ? 'ok' : SWNET.upnp.error}`);
-  return { ok: true, code: SWNET.code, lan, public: pub, upnp: SWNET.upnp.ok, upnpError: SWNET.upnp.ok ? null : SWNET.upnp.error, port: SWNET.port, firewall };
+  return { ok: true, code: SWNET.code, lan, public: pub, upnp: SWNET.upnp.ok, upnpVia: SWNET.upnp.via || 'UPnP', upnpError: SWNET.upnp.ok ? null : SWNET.upnp.error, port: SWNET.port, firewall, cgnat };
 });
 ipcMain.handle('swnet:stop', () => { swnetStop(); return { ok: true }; });
 const inv_lan = code => (Invite.decode(code) || {}).lanIp;
@@ -2440,23 +2464,21 @@ ipcMain.handle('swnet:play', async (_e, id, code) => {
   if (code) {
     const inv = Invite.decode(code);
     if (!inv) return { ok: false, error: 'Code d\'invitation invalide : vérifie qu\'il est complet.' };
-    const mine = lanAddrs();
-    const sameLan = inv.lanIp && mine.some(ip => ip.split('.').slice(0, 3).join('.') === inv.lanIp.split('.').slice(0, 3).join('.'));
-    const sameHome = inv.publicIp && (await publicIp()) === inv.publicIp;
-    addr = (sameLan || sameHome || !inv.publicIp) ? inv.lanIp : inv.publicIp;
     port = inv.port; password = inv.password;
-    if (!addr) return { ok: false, error: 'Ce code ne contient pas d\'adresse joignable.' };
+    // on teste les deux routes (réseau local et Internet) : beaucoup de box utilisent les mêmes adresses 192.168.1.x
+    const cands = [inv.lanIp, inv.publicIp].filter(Boolean);
+    if (!cands.length) return { ok: false, error: 'Ce code ne contient pas d\'adresse joignable.' };
+    const res = await Promise.all(cands.map(a => probeRoom(a, port).then(ok => ({ a, ok }))));
+    log?.write('MULTI', `test du salon : ${res.map(r => `${r.a === inv.lanIp ? 'local' : 'Internet'} ${r.ok ? 'répond' : 'muet'}`).join(', ')}`);
+    const hit = res.find(r => r.ok);
+    if (!hit) return { ok: false, error: `Le salon de ton ami ne répond pas, ni en réseau local ni par Internet. S'il n'est pas chez toi : sa box doit laisser passer le port UDP ${port} vers son PC (sa fenêtre « Héberger » doit afficher « ✓ Par Internet »). Sinon, essayez dans l'autre sens : c'est toi qui héberges.` };
+    addr = hit.a;
   } else {
     if (!SWNET.room || SWNET.gameId !== id) return { ok: false, error: 'Le salon est fermé : héberge à nouveau.' };
     addr = '127.0.0.1'; port = SWNET.port; password = SWNET.password;
   }
   const host = !code;
   log?.write('MULTI', `Switch en ligne : ${host ? 'hôte' : 'invité'} → ${addr}:${port}`);
-  if (!host) {
-    const probe = await probeRoom(addr, port);
-    log?.write('MULTI', `test du salon ${addr}:${port} : ${probe ? 'répond' : 'aucune réponse'}`);
-    if (!probe) return { ok: false, error: `Le salon de ton ami ne répond pas (${addr === inv_lan(code) ? 'réseau local' : 'Internet'}). Vérifie qu'il a cliqué sur « Héberger » et que son salon est ouvert. Hors de chez lui, sa box doit laisser passer le port UDP ${port} vers son PC, et Windows doit avoir autorisé « arcadia-room ».` };
-  }
   const r = startGame(id, { skipResume: true, netHost: host, switchArgs: `-m "${netName()}:${password}@${addr}:${port}"`, onExit: host ? swnetStop : null });
   if (!r.ok && host) swnetStop();
   return r;
