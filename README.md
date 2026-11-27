@@ -28,7 +28,8 @@ Arcadia is a Windows game launcher that turns emulators into **engines**: you on
 - **English & French interface**, chosen at first launch. **Online updates** from this repository's releases (checked every hour, Windows notification when minimized), downloaded in the background and checksum-verified.
 - **PS1 16:9 widescreen** for games that have a DuckStation community widescreen patch.
 - **Light installer**: each console's engine downloads once, checksum-verified, the first time you play one of its games (packs on branch [`arcadia-packs`](../../tree/arcadia-packs)).
-- **Remote Controller Gamepad**: your phone (Remote Gamepad app) works like an Xbox controller and drives player 1 alongside it.
+- **Remote Controller Gamepad**: your phone (Remote Gamepad app) works like any controller.
+- **Local multiplayer for Switch games**: every connected controller becomes a player (up to 4).
 - **Rewind & hold-to-fast-forward** in the built-in engine, **drag & drop** of your own keys / firmware / BIOS, and a **custom Switch profile name**.
 
 ## Install

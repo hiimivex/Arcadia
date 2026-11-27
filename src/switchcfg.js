@@ -105,18 +105,19 @@ function dsuMapping() {
 
 // Moteur Switch d'Arcadia (arcadia-switch) : il lit lui-même manette + clavier et les fusionne dans sa manette
 // virtuelle (port 0) ; les vibrations repartent de là vers la vraie manette.
-function virtualMapping() {
-  const V = 'engine:virtual_gamepad,port:0';
+function virtualMapping(n = 0) {
+  const V = `engine:virtual_gamepad,port:${n}`, P = `player_${n}_`;
   const b = id => `"${V},button:${id}"`;
   const st = (x, y) => `"${V},axis_x:${x},axis_y:${y},deadzone:0.000000,range:1.000000"`;
-  return {
-    player_0_button_a: b(0), player_0_button_b: b(1), player_0_button_x: b(2), player_0_button_y: b(3),
-    player_0_button_lstick: b(4), player_0_button_rstick: b(5), player_0_button_l: b(6), player_0_button_r: b(7),
-    player_0_button_zl: b(8), player_0_button_zr: b(9), player_0_button_plus: b(10), player_0_button_minus: b(11),
-    player_0_button_dleft: b(12), player_0_button_dup: b(13), player_0_button_dright: b(14), player_0_button_ddown: b(15),
-    player_0_button_home: b(18), player_0_button_screenshot: b(19),
-    player_0_lstick: st(0, 1), player_0_rstick: st(2, 3)
+  const m = {
+    button_a: b(0), button_b: b(1), button_x: b(2), button_y: b(3),
+    button_lstick: b(4), button_rstick: b(5), button_l: b(6), button_r: b(7),
+    button_zl: b(8), button_zr: b(9), button_plus: b(10), button_minus: b(11),
+    button_dleft: b(12), button_dup: b(13), button_dright: b(14), button_ddown: b(15),
+    button_home: b(18), button_screenshot: b(19),
+    lstick: st(0, 1), rstick: st(2, 3)
   };
+  return Object.fromEntries(Object.entries(m).map(([k, v]) => [P + k, v]));
 }
 
 // Réglages généraux choisis dans Arcadia (page de l'émulateur Switch, qualité graphique) : ils sont écrits dans
@@ -152,6 +153,13 @@ function prepare(userDir, { docked = true, guid: chosen = '', mapping: chosenMap
     t = qtSet(t, 'Controls', 'player_0_vibration_enabled', 'true', 'true');
     t = qtSet(t, 'Controls', 'vibration_enabled', 'true', 'true');
     t = qtSet(t, 'Controls', 'enable_udp_controller', 'false', 'false');
+    // joueurs 2 à 4 : les autres manettes branchées ; le moteur les connecte au jeu quand elles sont là
+    for (let n = 1; n <= 3; n++) {
+      for (const [k, v] of Object.entries(virtualMapping(n))) t = qtSet(t, 'Controls', k, v, '');
+      t = qtSet(t, 'Controls', `player_${n}_connected`, 'false', 'false');
+      t = qtSet(t, 'Controls', `player_${n}_type`, '0', '0');
+      t = qtSet(t, 'Controls', `player_${n}_vibration_enabled`, 'true', 'true');
+    }
   }
   // la manette vue par le moteur lui-même (GUID SDL exact), sinon celle choisie dans Arcadia
   if (arcadia) { /* rien d'autre */ } else if (dsu) { // manette + clavier en même temps, via Arcadia

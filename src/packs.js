@@ -1,6 +1,6 @@
 // Moteurs téléchargés à la demande (premier jeu d'une console), vérifiés par sha256
 'use strict';
-const BASE = 'https://raw.githubusercontent.com/hiimivex/Arcadia/92854558d1f1c5640f71fc39a22430d0456464f2/';
+const BASE = 'https://raw.githubusercontent.com/hiimivex/Arcadia/f54451b66eccdc11d866c2e2f84b07286c4ddf1c/';
 const PACKS = {
   'core-azahar_libretro': { file: 'core-azahar_libretro.zip', sha256: '1a7016af3416692c74e319751bd53f4b867cd3853421fe29a2d493905e1f024a', size: 12097452 },
   'core-bsnes_libretro': { file: 'core-bsnes_libretro.zip', sha256: 'fe3219f1b4aa358099f4020bdba1457b8c9e9c670329f34d1373f53bd853ac65', size: 1040519 },
@@ -14,7 +14,7 @@ const PACKS = {
   'core-pcsx_rearmed_libretro': { file: 'core-pcsx_rearmed_libretro.zip', sha256: '8699b9bf0fb12915b3fbc7a44ca792fb1623ca7b3b266c675ef385b91a1b9dc2', size: 833846 },
   'core-ppsspp_libretro': { file: 'core-ppsspp_libretro.zip', sha256: '1f0a230511381e3687d8352ccc7825cb1b9d84e5e7b515ef1e4e9b5489459411', size: 8437992 },
   'core-swanstation_libretro': { file: 'core-swanstation_libretro.zip', sha256: '3042d8521c76adc6df3f85e08f4586516038ce163b109d5330e4b3a1fc51d636', size: 2578004 },
-  'switch': { file: 'switch.zip', sha256: '25e6d517c34988aa08c9b82eeef35a4cf9aaa5d0739818c6aa29325d9c788dbb', size: 17051132 },
+  'switch': { file: 'switch.zip', sha256: 'af6a7363278c870e63328e2b42226a8506efd4c9d62507d60e45e6dc795f105f', size: 17053331 },
   'system-dolphin': { file: 'system-dolphin.zip', sha256: 'd01a19025306356c0f2b36bb1e1712a681b37495487516c95ec9e18c0ce33432', size: 3282458 },
   'system-ppsspp': { file: 'system-ppsspp.zip', sha256: '38af135528dd9331e1170ab6549b7ce1f8aced097635474e36e046800fbd3f54', size: 8855186 },
 };

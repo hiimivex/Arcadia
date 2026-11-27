@@ -2,9 +2,10 @@
 // type : add = ajout, change = modification, fix = correctif
 const CHANGELOG = [
   {
-    v: '1.32.0', date: '2026-11-27',
+    v: '1.32.1', date: '2026-11-27',
     items: [
-      ['add', 'Remote Controller Gamepad : ton téléphone (appli Remote Gamepad) marche dans les jeux Arcadia comme ta manette Xbox. Les deux pilotent le joueur 1 : la dernière touchée prend la main.', 'Remote Controller Gamepad: your phone (Remote Gamepad app) works in Arcadia games just like your Xbox controller. Both drive player 1: the last one you touch takes over.'],
+      ['add', 'Remote Controller Gamepad : ton téléphone (appli Remote Gamepad) marche dans les jeux Arcadia comme une manette.', 'Remote Controller Gamepad: your phone (Remote Gamepad app) works in Arcadia games like a controller.'],
+      ['add', 'Jeux Switch à plusieurs sur le même PC : chaque manette branchée (téléphone compris) devient un joueur, jusqu\'à 4.', 'Local multiplayer for Switch games: every connected controller (phone included) becomes a player, up to 4.'],
     ]
   },
   {

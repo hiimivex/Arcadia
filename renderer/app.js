@@ -2324,7 +2324,7 @@ const PAD_TYPES = [
   ['keyboard', 'Clavier seulement', 'Rien à brancher · voir les touches'],
   ['switch', 'Manette Switch', 'Pro Controller, Joy-Con…'],
   ['xbox', 'Manette Xbox', 'Xbox, MSI, 8BitDo, PowerA…'],
-  ['remote', 'Remote Controller Gamepad', 'Ton téléphone (appli Remote Gamepad), en plus de ta manette'],
+  ['remote', 'Remote Controller Gamepad', 'Ton téléphone (appli Remote Gamepad), comme une manette'],
   ['generic', 'Autre manette', 'PlayStation, USB générique… calibrage touche par touche']
 ];
 // touches du clavier : positions physiques, affichées avec la disposition réelle (AZERTY, QWERTY…)

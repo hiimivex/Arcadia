@@ -1234,7 +1234,6 @@ function padRunnerArgs() {
   const inp = settings().input, args = [];
   if (inp && inp.guid && inp.type !== 'keyboard') args.push('--pad-first', inp.guid);
   args.push('--pad-layout', inp && inp.type && !['keyboard', 'remote'].includes(inp.type) ? inp.type : 'xbox', '--pad-db', padDbPath());
-  if (inp && inp.type === 'remote' && inp.guid) args.push('--pad-remote', inp.guid); // Remote Controller Gamepad : joueur 1 avec l'autre manette
   if (settings().controlsHint === false) args.push('--no-hint');
   return args;
 }
@@ -2056,7 +2055,7 @@ function startGame(id, opts = {}) {
       const asw = settings().switchEngine !== 'eden' && gsx.fallback !== app.getVersion() ? arcadiaSwitchExe() : null; // Switch 1 et 2
       if (asw && cpuInfo().sse42 === false) return { ok: false, error: 'Ton processeur ne prend pas en charge SSE4.2, indispensable au moteur Switch : les jeux Switch ne peuvent pas tourner sur ce PC.' };
       if (asw) {
-        const guid = (settings().input || {}).type === 'remote' ? '' : (settings().input || {}).guid || ''; // téléphone : il rejoint la vraie manette
+        const guid = (settings().input || {}).guid || '';
         try { SwitchCfg.prepare(need.dir, { opts: { ...Langs.switchOpts(gameLang(g)), ...swEngineOpts(id) }, arcadia: true }); } catch (e) { log?.write('INFO', `réglages Switch : ${e.message}`); }
         engine = { exe: asw, args: KNOWN_EMULATORS.edencli.args, env: { ARCADIA: '1', ARCADIA_USER_DIR: need.dir, ARCADIA_TITLE: `${decorate(g).title} — Arcadia`, ARCADIA_PAD_DB: exists(padDbPath()) ? padDbPath() : '', ARCADIA_PAD_GUID: guid, ARCADIA_CONTROLS: controlsFile(g.console), ARCADIA_STATS: statsFile(), ARCADIA_LIVE: path.join(need.dir, 'arcadia-live.ini'), ARCADIA_MOUSE: extOpts(id)['Arcadia/mouse'] || 'camera' } };
         log?.write('INFO', 'moteur Switch d\'Arcadia');
