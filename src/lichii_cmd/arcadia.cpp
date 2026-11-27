@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Arcadia : manette(s) + clavier fusionnés en une manette virtuelle (joueur 1), vibrations vers la vraie manette.
+// Arcadia : manette + clavier fusionnés en une manette virtuelle (joueur 1), autres manettes = joueurs 2 à 4, vibrations vers les vraies manettes.
 
 #include "lichii_cmd/arcadia.h"
 #include "lichii_cmd/arcadia_controls.h"
@@ -20,6 +20,9 @@
 
 #include "common/logging.h"
 #include "common/settings.h"
+#include "core/core.h"
+#include "hid_core/frontend/emulated_controller.h"
+#include "hid_core/hid_core.h"
 #include "input_common/drivers/virtual_gamepad.h"
 #include "input_common/main.h"
 
@@ -32,7 +35,10 @@ using VS = InputCommon::VirtualGamepad::VirtualStick;
 InputCommon::VirtualGamepad* g_pad = nullptr;
 SDL_Window* g_window = nullptr;
 SDL_Gamepad* g_gamepad = nullptr;
-SDL_Gamepad* g_remote = nullptr; // Remote Controller Gamepad (téléphone via manette virtuelle Xbox 360) : joueur 1 aussi
+// Joueurs 2 à 4 : les autres manettes branchées (téléphone Remote Gamepad compris), chacune sur son port
+SDL_Gamepad* g_extra[3] = {};
+Core::System* g_system = nullptr;
+bool g_multi = true; // ARCADIA_MULTI=0 : une seule manette lue
 std::mutex g_gamepad_mutex;
 Uint64 g_last_poll = 0;
 ArcadiaControls::Map g_map;          // touches réattribuées dans Arcadia (fichier partagé, relu s'il change)
@@ -164,27 +170,45 @@ std::string JsonEscape(const std::string& s) {
     return out;
 }
 
+// Joueurs 2+ : manettes branchées autres que celle du joueur 1, dans l'ordre d'arrivée
+void OpenExtras() {
+    if (!g_multi) {
+        return;
+    }
+    int count = 0;
+    SDL_JoystickID* ids = SDL_GetGamepads(&count);
+    if (!ids) {
+        return;
+    }
+    for (int i = 0; i < count; i++) {
+        bool have = g_gamepad && SDL_GetGamepadID(g_gamepad) == ids[i];
+        for (auto* x : g_extra) have = have || (x && SDL_GetGamepadID(x) == ids[i]);
+        if (have) continue;
+        for (auto*& x : g_extra) {
+            if (!x) {
+                x = SDL_OpenGamepad(ids[i]);
+                if (x) {
+                    const char* name = SDL_GetGamepadName(x);
+                    Emit(std::string{"{\"event\":\"pad2\",\"name\":\""} + JsonEscape(name ? name : "") + "\"}");
+                }
+                break;
+            }
+        }
+    }
+    SDL_free(ids);
+}
+
 // Choisit la manette : celle demandée par Arcadia (ARCADIA_PAD_GUID), sinon la première branchée
 void OpenGamepad() {
     std::scoped_lock lk{g_gamepad_mutex};
-    if (g_remote && !SDL_GamepadConnected(g_remote)) {
-        SDL_CloseGamepad(g_remote);
-        g_remote = nullptr;
+    for (auto*& x : g_extra) {
+        if (x && !SDL_GamepadConnected(x)) {
+            SDL_CloseGamepad(x);
+            x = nullptr;
+        }
     }
     if (g_gamepad && SDL_GamepadConnected(g_gamepad)) {
-        const char* ro = Env("ARCADIA_REMOTE");
-        if (!g_remote && !(ro && ro[0] == '0')) {
-            int n = 0;
-            SDL_JoystickID* all = SDL_GetGamepads(&n);
-            for (int i = 0; all && i < n; i++) {
-                if (all[i] != SDL_GetGamepadID(g_gamepad) && SDL_GetGamepadVendorForID(all[i]) == 0x045E &&
-                    SDL_GetGamepadProductForID(all[i]) == 0x028E) {
-                    g_remote = SDL_OpenGamepad(all[i]);
-                    break;
-                }
-            }
-            SDL_free(all);
-        }
+        OpenExtras();
         return;
     }
     if (g_gamepad) {
@@ -201,15 +225,6 @@ void OpenGamepad() {
     const char* slotEnv = Env("ARCADIA_PAD_SLOT");
     const int slot = slotEnv ? std::max(0, std::atoi(slotEnv)) : 0;
     SDL_JoystickID pick = count > slot ? ids[slot] : 0;
-    // joueur 1 sans manette demandée : une vraie manette d'abord, le téléphone (manette virtuelle) la rejoint ensuite
-    if (!wanted && slot == 0) {
-        for (int i = 0; i < count; i++) {
-            if (!(SDL_GetGamepadVendorForID(ids[i]) == 0x045E && SDL_GetGamepadProductForID(ids[i]) == 0x028E)) {
-                pick = ids[i];
-                break;
-            }
-        }
-    }
     if (wanted) {
         for (int i = 0; i < count; i++) {
             char guid[64]{};
@@ -218,6 +233,12 @@ void OpenGamepad() {
                 pick = ids[i];
                 break;
             }
+        }
+    }
+    for (auto*& x : g_extra) { // la manette du joueur 1 ne peut pas aussi être celle d'un autre joueur
+        if (x && SDL_GetGamepadID(x) == pick) {
+            SDL_CloseGamepad(x);
+            x = nullptr;
         }
     }
     if (pick) {
@@ -231,9 +252,18 @@ void OpenGamepad() {
         }
     }
     SDL_free(ids);
+    OpenExtras();
 }
 
 void OnVibration(std::size_t port, const Common::Input::VibrationStatus& v) {
+    if (port >= 1 && port <= 3) {
+        std::scoped_lock lk{g_gamepad_mutex};
+        if (g_extra[port - 1]) {
+            const float a = std::clamp((std::max)(v.low_amplitude, v.high_amplitude), 0.f, 1.f);
+            SDL_RumbleGamepad(g_extra[port - 1], static_cast<Uint16>(a * 0xFFFF), static_cast<Uint16>(a * 0xFFFF), 250);
+        }
+        return;
+    }
     if (port != 0) {
         return;
     }
@@ -365,12 +395,15 @@ void Emit(const std::string& json) {
     std::fflush(stdout);
 }
 
-void Init(InputCommon::InputSubsystem* input, SDL_Window* window) {
+void Init(InputCommon::InputSubsystem* input, SDL_Window* window, Core::System* system) {
     if (!Enabled()) {
         return;
     }
     InstallCrashHandler(); // au cas où une bibliothèque l'aurait remplacé pendant le chargement
     g_window = window;
+    g_system = system;
+    if (const char* m = Env("ARCADIA_MULTI")) g_multi = m[0] != '0';
+    if (Env("ARCADIA_PAD_SLOT")) g_multi = false; // mode deux fenêtres : une manette par moteur
     g_pad = input->GetVirtualGamepad();
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
     SDL_InitSubSystem(SDL_INIT_GAMEPAD | SDL_INIT_HAPTIC);
@@ -399,6 +432,47 @@ void OnEvent(const SDL_Event& event) {
     if (event.type == SDL_EVENT_MOUSE_MOTION && g_rel) { g_mouse_dx += event.motion.xrel; g_mouse_dy += event.motion.yrel; }
 }
 
+// Joueurs 2 à 4 : disposition Nintendo par position (A à droite, B en bas), manette connectée au jeu tant qu'elle est branchée
+void PollExtras() {
+    SDL_Gamepad* ex[3];
+    {
+        std::scoped_lock lk{g_gamepad_mutex};
+        for (int i = 0; i < 3; i++) ex[i] = g_extra[i];
+    }
+    for (int i = 0; i < 3; i++) {
+        const std::size_t port = i + 1;
+        SDL_Gamepad* q = ex[i];
+        if (g_system) {
+            if (auto* c = g_system->HIDCore().GetEmulatedControllerByIndex(port)) {
+                if (q && !c->IsConnected()) {
+                    c->SetNpadStyleIndex(Core::HID::NpadStyleIndex::Fullkey);
+                    c->Connect();
+                } else if (!q && c->IsConnected()) {
+                    c->Disconnect();
+                }
+            }
+        }
+        if (!q) {
+            continue;
+        }
+        struct M { VB v; SDL_GamepadButton b; };
+        static const M kMap[] = {
+            {VB::ButtonA, SDL_GAMEPAD_BUTTON_EAST}, {VB::ButtonB, SDL_GAMEPAD_BUTTON_SOUTH},
+            {VB::ButtonX, SDL_GAMEPAD_BUTTON_NORTH}, {VB::ButtonY, SDL_GAMEPAD_BUTTON_WEST},
+            {VB::TriggerL, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER}, {VB::TriggerR, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER},
+            {VB::ButtonPlus, SDL_GAMEPAD_BUTTON_START}, {VB::ButtonMinus, SDL_GAMEPAD_BUTTON_BACK},
+            {VB::StickL, SDL_GAMEPAD_BUTTON_LEFT_STICK}, {VB::StickR, SDL_GAMEPAD_BUTTON_RIGHT_STICK},
+            {VB::ButtonUp, SDL_GAMEPAD_BUTTON_DPAD_UP}, {VB::ButtonDown, SDL_GAMEPAD_BUTTON_DPAD_DOWN},
+            {VB::ButtonLeft, SDL_GAMEPAD_BUTTON_DPAD_LEFT}, {VB::ButtonRight, SDL_GAMEPAD_BUTTON_DPAD_RIGHT},
+            {VB::ButtonHome, SDL_GAMEPAD_BUTTON_GUIDE}, {VB::ButtonCapture, SDL_GAMEPAD_BUTTON_MISC1}};
+        for (const auto& m : kMap) g_pad->SetButtonState(port, m.v, Btn(q, m.b));
+        g_pad->SetButtonState(port, VB::TriggerZL, Axis(q, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 0.5f);
+        g_pad->SetButtonState(port, VB::TriggerZR, Axis(q, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 0.5f);
+        g_pad->SetStickPosition(port, VS::Left, Axis(q, SDL_GAMEPAD_AXIS_LEFTX), -Axis(q, SDL_GAMEPAD_AXIS_LEFTY));
+        g_pad->SetStickPosition(port, VS::Right, Axis(q, SDL_GAMEPAD_AXIS_RIGHTX), -Axis(q, SDL_GAMEPAD_AXIS_RIGHTY));
+    }
+}
+
 void Poll() {
     if (!g_pad) {
         return;
@@ -417,14 +491,12 @@ void Poll() {
     if (g_watch.Changed()) AC::Load(g_watch.path, g_map); // changé depuis le menu Échap d'Arcadia
     if (g_live.Changed()) ApplyLive();
     SDL_Gamepad* p;
-    SDL_Gamepad* r;
     {
         std::scoped_lock lk{g_gamepad_mutex};
         p = g_gamepad;
-        r = g_remote;
     }
     const AC::Device dev = g_map.device;
-    if (dev == AC::KEYBOARD) p = r = nullptr; // clavier seul
+    if (dev == AC::KEYBOARD) p = nullptr; // clavier seul
     // Clavier : seulement quand la fenêtre du jeu est devant ; touches par position (AZERTY = QWERTY)
     const bool focused = g_window && (SDL_GetWindowFlags(g_window) & SDL_WINDOW_INPUT_FOCUS);
     const bool useKb = (focused || g_kb_global) && (dev == AC::BOTH || dev == AC::KEYBOARD);
@@ -447,7 +519,7 @@ void Poll() {
         k = SDL_GetKeyboardState(&nkeys);
     }
     auto pressed = [&](int a) {
-        for (int c : g_map.pad[a]) if (AC::PadDown(p, c) || (r && AC::PadDown(r, c))) return true;
+        for (int c : g_map.pad[a]) if (AC::PadDown(p, c)) return true;
         for (int sc : g_map.kb[a]) if (AC::KeyDown(k, nkeys, sc)) return true;
         return false;
     };
@@ -460,18 +532,11 @@ void Poll() {
         if (a == AC::ZL && (mb & SDL_BUTTON_RMASK)) on = true; // clic droit
         g_pad->SetButtonState(0, kButton[a], on);
     }
-    g_pad->SetButtonState(0, VB::ButtonCapture, Btn(p, SDL_GAMEPAD_BUTTON_MISC1) || Btn(r, SDL_GAMEPAD_BUTTON_MISC1));
+    g_pad->SetButtonState(0, VB::ButtonCapture, Btn(p, SDL_GAMEPAD_BUTTON_MISC1));
 
     // Sticks : manette, sauf si une direction clavier est tenue ; stick arcade : le levier (croix) pilote aussi le stick gauche
     auto stick = [&](VS s, SDL_GamepadAxis ax, SDL_GamepadAxis ay, int up) {
         float x = Axis(p, ax), y = -Axis(p, ay);
-        if (r) {
-            const float rx = Axis(r, ax), ry = -Axis(r, ay);
-            if (rx * rx + ry * ry > x * x + y * y) {
-                x = rx;
-                y = ry;
-            }
-        }
         int kx = 0, ky = 0;
         for (int sc : g_map.kb[up + 3]) if (AC::KeyDown(k, nkeys, sc)) kx++;
         for (int sc : g_map.kb[up + 2]) if (AC::KeyDown(k, nkeys, sc)) kx--;
@@ -491,6 +556,7 @@ void Poll() {
     };
     stick(VS::Left, SDL_GAMEPAD_AXIS_LEFTX, SDL_GAMEPAD_AXIS_LEFTY, AC::LS_UP);
     stick(VS::Right, SDL_GAMEPAD_AXIS_RIGHTX, SDL_GAMEPAD_AXIS_RIGHTY, AC::RS_UP);
+    PollExtras();
 }
 
 void Shutdown() {
@@ -500,11 +566,14 @@ void Shutdown() {
         SDL_CloseGamepad(g_gamepad);
         g_gamepad = nullptr;
     }
-    if (g_remote) {
-        SDL_CloseGamepad(g_remote);
-        g_remote = nullptr;
+    for (auto*& x : g_extra) {
+        if (x) {
+            SDL_CloseGamepad(x);
+            x = nullptr;
+        }
     }
     g_pad = nullptr;
+    g_system = nullptr;
 }
 
 } // namespace Arcadia

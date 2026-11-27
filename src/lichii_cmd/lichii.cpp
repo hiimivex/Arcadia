@@ -877,7 +877,7 @@ extern "C" SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
         state->system.Run();
     });
 
-    Arcadia::Init(&state->input_subsystem, state->emu_window->GetSDLWindow());
+    Arcadia::Init(&state->input_subsystem, state->emu_window->GetSDLWindow(), &state->system);
     Arcadia::Emit(fmt::format("{{\"event\":\"ready\",\"titleId\":\"{:016X}\"}}",
         state->system.GetApplicationProcessProgramID()));
     void(state->system.Run());

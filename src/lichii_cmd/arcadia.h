@@ -6,6 +6,10 @@
 #include <string>
 #include <SDL3/SDL.h>
 
+namespace Core {
+class System;
+}
+
 namespace InputCommon {
 class InputSubsystem;
 }
@@ -22,7 +26,7 @@ bool Enabled();
 std::string WindowTitle();
 
 /// Après la création de la fenêtre et du système d'entrées
-void Init(InputCommon::InputSubsystem* input, SDL_Window* window);
+void Init(InputCommon::InputSubsystem* input, SDL_Window* window, Core::System* system);
 
 /// Événements SDL (branchement / débranchement des manettes)
 void OnEvent(const SDL_Event& event);
