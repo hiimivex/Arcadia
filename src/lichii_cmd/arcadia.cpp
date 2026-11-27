@@ -201,6 +201,15 @@ void OpenGamepad() {
     const char* slotEnv = Env("ARCADIA_PAD_SLOT");
     const int slot = slotEnv ? std::max(0, std::atoi(slotEnv)) : 0;
     SDL_JoystickID pick = count > slot ? ids[slot] : 0;
+    // joueur 1 sans manette demandée : une vraie manette d'abord, le téléphone (manette virtuelle) la rejoint ensuite
+    if (!wanted && slot == 0) {
+        for (int i = 0; i < count; i++) {
+            if (!(SDL_GetGamepadVendorForID(ids[i]) == 0x045E && SDL_GetGamepadProductForID(ids[i]) == 0x028E)) {
+                pick = ids[i];
+                break;
+            }
+        }
+    }
     if (wanted) {
         for (int i = 0; i < count; i++) {
             char guid[64]{};
