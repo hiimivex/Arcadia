@@ -252,8 +252,8 @@ static const char* actionLabel(int a) {
 
 static void secPad() {
   namespace AC = ArcadiaControls;
-  SDL_Gamepad* g = g_app.pads[0];
-  std::string head = g ? std::string("Manette : ") + (SDL_GetGamepadName(g) ? SDL_GetGamepadName(g) : "manette") : std::string("Aucune manette branchée");
+  SDL_Gamepad* g = g_app.p1();
+  std::string head = g ? std::string("Manette : ") + (g_app.padLabel(g) ? g_app.padLabel(g) : "manette") : std::string("Aucune manette branchée");
   heading("Contrôles", head.c_str());
   if (!g_app.controls.loaded) g_app.controls = AC::Defaults(false);
   auto save = [] { if (!g_app.ctlWatch.path.empty()) { AC::Save(g_app.ctlWatch.path, g_app.controls); g_app.ctlWatch.Touch(); } };
@@ -349,8 +349,8 @@ static void drawControlsHint() {
   if (t > 7.5f) return;
   float a = std::min(1.f, std::min(t / .4f, (7.5f - t) / .6f));
   ImDrawList* fg = ImGui::GetForegroundDrawList(); ImVec2 ds = ImGui::GetIO().DisplaySize;
-  SDL_Gamepad* g = g_app.pads[0];
-  std::string l1 = std::string("\xE2\x9C\xA6  ") + (g ? (SDL_GetGamepadName(g) ? SDL_GetGamepadName(g) : TR("Manette")) : TR("Branche une manette quand tu veux")) + "      \xE2\x8C\xA8  " + TR("Clavier");
+  SDL_Gamepad* g = g_app.p1();
+  std::string l1 = std::string("\xE2\x9C\xA6  ") + (g ? (g_app.padLabel(g) ? g_app.padLabel(g) : TR("Manette")) + (g_app.padRemote ? std::string("  +  Remote Controller Gamepad") : std::string()) : TR("Branche une manette quand tu veux")) + "      \xE2\x8C\xA8  " + TR("Clavier");
   const char* l2 = "Les deux marchent en même temps. Échap ou Guide : menu → Contrôles pour changer les touches ou calibrer.";
   float w = std::max(textSize(fBold, 20, l1.c_str()).x, textSize(fReg, 17, l2).x) + 56 * S, h = 92 * S;
   ImVec2 p0(36 * S, ds.y - h - 40 * S), p1(p0.x + w, p0.y + h);

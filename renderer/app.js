@@ -303,8 +303,6 @@ function renderGame() {
   play.disabled = !!warn;
   play.classList.toggle('running', running.has(g.id));
   $('#g-play-label').textContent = running.has(g.id) ? 'EN COURS' : 'JOUER';
-  $('#g-online').classList.toggle('hidden', !isMk8(g) || !!warn);
-  $('#g-online').disabled = running.has(g.id);
   // catégories
   const chips = $('#g-cats');
   chips.replaceChildren();
@@ -331,7 +329,6 @@ function renderGame() {
   else $('#g-emu').textContent = setup ? (S.emulators[setup.emulator]?.name || setup.emulator || 'Personnalisé') + (warn ? ' (introuvable)' : '') : 'Aucun';
   if (g.broken) { $('#g-warning').textContent = '⚠ Ce fichier semble vide (que des zéros) : copie interrompue ou récupération ratée. Il ne se lancera pas, remplace-le par une copie saine.'; $('#g-warning').classList.remove('hidden'); }
   renderDetails(g);
-  renderMulti(g);
   renderSavesPanel(g);
   renderGameSettings(g);
   renderUpdates(g);
@@ -576,6 +573,7 @@ async function play(id, o) {
   const res = await arcadia.launch(id, o);
   if (!res.ok && res.resumePick) { resumeModal(g, res.resumePick.items, res.resumePick); return; }
   if (!res.ok && res.needSwitch) { switchKeysModal(g, res.needSwitch); return; }
+  if (!res.ok && res.needPack) { if (await packModal(g, res.needPack)) play(id, { ...(o || {}), skipResume: true }); return; }
   if (!res.ok && res.needBios) { biosModal(g, res.needBios); return; }
   if (!res.ok && res.needPs3Fw) { ps3FirmwareModal(g); return; }
   if (!res.ok && res.needVitaFw) { vitaFirmwareModal(g); return; }
@@ -1532,7 +1530,6 @@ $('.tab[data-view=stats]').onclick = () => showStats();
 $('#imp-close').onclick = () => $('#import').classList.add('hidden');
 $('#modal').onclick = e => { if (e.target.id === 'modal') closeModal(); };
 $('#g-play').onclick = () => selectedId && play(selectedId);
-$('#g-online').onclick = async () => { if (!selectedId) return; const g = gameById(selectedId); if (await askSwitchProfile(g)) onlineModal(g); };
 $('#g-fav').onclick = async () => { S = await arcadia.toggleFavorite(selectedId); renderAll(); };
 $('#g-more').onclick = e => { const r = e.currentTarget.getBoundingClientRect(); gameMenu(r.left - 180, r.bottom + 4, gameById(selectedId)); e.stopPropagation(); };
 $('#search').oninput = () => { renderSidebar(); if (view === 'home') renderHome(); else if ($('#search').value) showHome(); };
@@ -1562,7 +1559,6 @@ arcadia.onExited(({ id, seconds, stats, backup }) => {
 });
 arcadia.onStateUpdate(st => { S = st; renderAll(); if (BP.on) bpRender(); });
 arcadia.onResume(({ id, items }) => { const g = gameById(id); if (g) resumeModal(g, items); });
-arcadia.onFallback(({ title }) => toast(`${title} : le moteur Arcadia a eu un souci, relance avec le moteur de secours…`, false, { label: 'Créer un rapport', fn: makeReport }));
 arcadia.onError(({ id, error }) => { running.delete(id); toast(`Impossible de lancer : ${error}`, true, { label: 'Créer un rapport', fn: makeReport }); renderAll(); });
 
 // ------------------------------------------------------------ démarrage
@@ -1634,7 +1630,7 @@ arcadia.onEngineCrash(d => {
     const fb = el('button', 'btn-ghost', `Utiliser ${d.backup}`); fb.onclick = async () => { closeModal(); const r = await arcadia.useFallback(d.id); if (r && !r.ok && r.error) toast(r.error, true); };
     const again = el('button', 'btn-white', 'Réessayer'); again.onclick = () => { closeModal(); play(d.id, { skipResume: true }); };
     a.append(rep, fb, again); c.append(a);
-    c.append(el('p', 'muted small', `${d.backup} n'utilise pas les réglages d'Arcadia (manette, menu Échap, en ligne) : ton choix vaut pour ce jeu jusqu'à la prochaine version d'Arcadia.`));
+    c.append(el('p', 'muted small', `${d.backup} n'utilise pas les réglages d'Arcadia (manette, menu Échap) : ton choix vaut pour ce jeu jusqu'à la prochaine version d'Arcadia.`));
   }, true);
 });
 // ------------------------------------------------------------ nom du profil de joueur Switch (au lieu de « Eden »)
@@ -1647,60 +1643,6 @@ async function askSwitchProfile(g, force) {
   const r = await arcadia.setSwitchProfile(name).catch(() => null);
   if (r && r.state) { S = r.state; toast(`Profil Switch : ${r.name}`); }
   return true;
-}
-// ------------------------------------------------------------ Mario Kart 8 Deluxe en ligne entre amis (salon privé gratuit)
-const isMk8 = g => !!g && g.console === 'SWITCH' && (String(g.titleId || '').toUpperCase() === '0100152000022000' || /mario\s*kart\s*8/i.test(g.title || ''));
-function onlineModal(g) {
-  const tips = role => {
-    const ul = el('ol', 'net-steps');
-    const steps = role === 'host'
-      ? ['Dans Mario Kart : Sans fil local → choisis le nombre de joueurs sur ton PC → Créer une salle.', 'Attends que tes amis apparaissent, puis lance la course.']
-      : ['Dans Mario Kart : Sans fil local → choisis le nombre de joueurs sur ton PC.', 'La salle de ton ami apparaît : rejoins-la.'];
-    for (const s of steps) ul.append(el('li', '', s));
-    return ul;
-  };
-  openModal(c => {
-    c.classList.add('net-modal');
-    c.append(el('div', 'fr-tag', '// en ligne entre amis'), el('h2', '', `${g.title} · salon privé`));
-    c.append(el('p', 'muted', 'Gratuit et sans compte : un ami héberge le salon sur son PC, les autres le rejoignent avec son code. Jusqu\'à 8 PC, et plusieurs joueurs par PC.'));
-    const row = el('div', 'lang-pick');
-    const hb = el('button', 'lang-btn'); hb.append(el('b', '', 'Héberger'), el('span', '', 'Je crée le salon et j\'invite'));
-    const jb = el('button', 'lang-btn'); jb.append(el('b', '', 'Rejoindre'), el('span', '', 'J\'ai reçu un code'));
-    row.append(hb, jb); c.append(row);
-    const zone = el('div', 'net-zone'); c.append(zone);
-    const a = el('div', 'modal-actions'); const close = el('button', 'btn-ghost', 'Fermer'); close.onclick = () => closeModal(); a.append(close); c.append(a);
-    hb.onclick = async () => {
-      hb.disabled = jb.disabled = true; zone.replaceChildren(el('p', 'muted', 'Ouverture du salon… La première fois, Windows demande une autorisation pour son pare-feu : accepte (« Oui »).'));
-      const r = await arcadia.swnetHost(g.id).catch(e => ({ ok: false, error: e.message }));
-      hb.disabled = jb.disabled = false;
-      if (!r.ok) { zone.replaceChildren(el('p', 'net-err', r.error)); return; }
-      const codeBox = el('div', 'net-code'); codeBox.setAttribute('data-notr', ''); codeBox.textContent = r.code;
-      const copy = el('button', 'btn-ghost', 'Copier le code'); copy.onclick = () => { navigator.clipboard.writeText(r.code); toast('Code copié : envoie-le à tes amis'); };
-      const reach = el('div', 'net-reach');
-      reach.append(el('div', 'ok', `✓ Même Wi-Fi / même box : tes amis te rejoignent directement (${r.lan || 'réseau local'}).`));
-      reach.append(r.cgnat ? el('div', 'warn', '⚠ Par Internet : ta connexion partage son adresse avec d\'autres abonnés (box 4G/5G ou double box), personne ne peut te rejoindre de l\'extérieur. Pour jouer à distance, c\'est ton ami qui doit héberger.') : r.upnp ? el('div', 'ok', '✓ Par Internet : ta box a ouvert le port toute seule.') : el('div', 'warn', `⚠ Par Internet : ta box n'a pas ouvert le port toute seule. Dans l'interface de ta box, redirige le port UDP ${r.port} vers ce PC (${r.lan || '?'}). Ce n'est pas nécessaire pour jouer à plusieurs chez toi. Si tu ne peux pas (box 4G/5G), c'est ton ami qui héberge.`));
-      if (!r.upnp && !r.cgnat && r.upnpError) reach.append(el('div', 'muted small', `Détail : ${r.upnpError}`));
-      reach.append(r.firewall === 'ok' ? el('div', 'ok', '✓ Pare-feu Windows : le salon est autorisé.') : el('div', 'warn', '⚠ Pare-feu Windows : autorisation refusée. Tes amis risquent d\'être bloqués : héberge à nouveau et accepte la demande de Windows.'));
-      const go = el('button', 'btn-white', '▶ Lancer Mario Kart');
-      go.onclick = async () => { go.disabled = true; const x = await arcadia.swnetPlay(g.id).catch(e => ({ ok: false, error: e.message })); go.disabled = false; if (x.ok) closeModal(); else toast(x.error, true); };
-      const stop = el('button', 'btn-ghost', 'Fermer le salon'); stop.onclick = async () => { await arcadia.swnetStop(); zone.replaceChildren(el('p', 'muted', 'Salon fermé.')); };
-      const btns = el('div', 'btn-row'); btns.append(copy, go, stop);
-      zone.replaceChildren(el('div', 'net-label', 'Ton code d\'invitation'), codeBox, btns, reach, tips('host'));
-    };
-    jb.onclick = () => {
-      const inp = el('input', 'net-input'); inp.placeholder = 'MK-XXXXXX-XXXXXX-XXXXXX-XXXXXX'; inp.spellcheck = false;
-      const go = el('button', 'btn-white', 'Rejoindre');
-      go.onclick = async () => {
-        if (!inp.value.trim()) { inp.focus(); return; }
-        go.disabled = true; const x = await arcadia.swnetPlay(g.id, inp.value.trim()).catch(e => ({ ok: false, error: e.message })); go.disabled = false;
-        if (x.ok) closeModal(); else toast(x.error, true);
-      };
-      inp.onkeydown = e => { if (e.key === 'Enter') go.click(); };
-      const btns = el('div', 'btn-row'); btns.append(inp, go);
-      zone.replaceChildren(el('div', 'net-label', 'Colle le code de ton ami'), btns, tips('join'));
-      setTimeout(() => inp.focus(), 50);
-    };
-  }, true);
 }
 // ------------------------------------------------------------ historique des mises à jour
 const CL_TAG = { add: ['Ajout', 'New'], change: ['Modif', 'Changed'], fix: ['Correctif', 'Fixed'] };
@@ -1898,95 +1840,9 @@ async function renderDetails(g) {
   show(d || { shots: [] });
 }
 
-// ------------------------------------------------------------ multijoueur
+// ------------------------------------------------------------ Discord
 const DISCORD = 'https://discord.gg/7XczndQEsG';
 function discordLink(text) { const a = el('a', 'oops-link', text || 'Discord'); a.href = '#'; a.onclick = e => { e.preventDefault(); arcadia.openUrl(DISCORD); }; return a; }
-const MULTI_ICON = { couch: '🎮', adhoc: '📡', wireless: '📶', ldn: '🌐', dswifi: '📶', dead: '⛔' };
-async function renderMulti(g) {
-  const box = $('#g-multi');
-  box.classList.add('hidden');
-  if (true) return; // multijoueur Arcadia : mis de côté pour l'instant (on y reviendra)
-  const m = await arcadia.gameMulti(g.id).catch(() => null);
-  if (selectedId !== g.id || !m || m.solo) return;
-  box.replaceChildren(el('h3', '', 'MULTIJOUEUR'));
-  box.classList.remove('hidden');
-  if (!m.known) {
-    const p = el('p', 'muted');
-    p.append(document.createTextNode('Je ne connais pas encore ce jeu. S\'il a un mode multijoueur, contacte-moi sur '), discordLink(), document.createTextNode(' pour que je le branche !'));
-    box.append(p); return;
-  }
-  for (const mode of m.modes) {
-    const row = el('div', 'multi-row' + (mode.ready ? '' : ' off'));
-    const head = el('div', 'multi-head');
-    head.append(el('span', 'multi-ico', MULTI_ICON[mode.type] || '•'));
-    const t = el('div', ''); t.append(el('b', '', mode.label), el('span', 'muted small', mode.type === 'dead' ? 'Serveurs fermés' : `Jusqu'à ${mode.players} joueurs`));
-    head.append(t); row.append(head);
-    const acts = el('div', 'multi-acts');
-    if (!mode.ready) {
-      const p = el('p', 'small muted');
-      p.append(document.createTextNode((mode.why || 'Pas encore branché.') + ' '));
-      if (mode.type !== 'dead') p.append(document.createTextNode('Contacte-moi sur '), discordLink(), document.createTextNode(' pour que je regarde !'));
-      acts.append(p);
-    } else if (mode.type === 'couch') {
-      acts.append(el('span', 'small muted', mode.how));
-    } else if (mode.type === 'adhoc') {
-      const pub = el('button', 'btn-white sm', 'Salle publique'); pub.title = 'Serveur ad hoc public : toi et tes amis choisissez la même salle, rien à configurer';
-      pub.onclick = () => launchMulti(g, { type: 'adhoc', server: 'public', role: 'join' });
-      const host = el('button', 'btn-ghost sm', 'Héberger'); host.onclick = () => multiModal(g, m, mode, 'host');
-      const join = el('button', 'btn-ghost sm', 'Rejoindre'); join.onclick = () => multiModal(g, m, mode, 'join');
-      acts.append(pub, host, join);
-    } else if (mode.type === 'wireless') {
-      if (mode.canHost) { const host = el('button', 'btn-white sm', 'Héberger un salon'); host.onclick = () => multiModal(g, m, mode, 'host'); acts.append(host); }
-      const join = el('button', 'btn-ghost sm', 'Rejoindre'); join.onclick = () => multiModal(g, m, mode, 'join'); acts.append(join);
-    }
-    row.append(acts); box.append(row);
-  }
-}
-async function launchMulti(g, o) {
-  const r = await arcadia.playMulti(g.id, o);
-  if (!r.ok) { toast(r.error, true); return; }
-  if (r.manual) openModal(c => {
-    c.append(el('h2', '', 'Dernière étape dans Azahar'));
-    c.append(el('p', '', 'Azahar ne sait pas rejoindre un salon tout seul. Dans sa fenêtre : menu Multijoueur → Connexion directe → Connecter. L\'adresse est déjà remplie.' + (o.password ? ' Saisis le mot de passe du salon.' : '')));
-    const a = el('div', 'modal-actions'); const ok = el('button', 'btn-white', 'Compris'); ok.onclick = closeModal; a.append(ok); c.append(a);
-  });
-}
-function multiModal(g, m, mode, role) {
-  openModal(card => {
-    card.classList.add('multi-modal');
-    const psp = mode.type === 'adhoc';
-    card.append(el('h2', '', role === 'host' ? 'Héberger une partie' : 'Rejoindre une partie'));
-    const f = el('div', 'multi-form');
-    const field = (label, input) => { const l = el('label', ''); l.append(el('span', 'muted small', label), input); f.append(l); return input; };
-    let ip, port, pass, max;
-    if (role === 'host') {
-      const addr = el('div', 'multi-addr');
-      addr.append(el('div', 'muted small', 'Donne cette adresse à tes amis :'));
-      addr.append(el('div', 'mono big', m.public ? `${m.public}` : 'adresse publique inconnue (hors ligne ?)'));
-      if (m.lan.length) addr.append(el('div', 'muted small', `Même réseau (Wi-Fi/maison) : ${m.lan.join(' · ')}`));
-      f.append(addr);
-      if (!psp) { pass = field('Mot de passe (facultatif, pour un salon privé)', Object.assign(el('input'), { type: 'text', placeholder: 'aucun = salon ouvert' })); max = field('Joueurs max', Object.assign(el('input'), { type: 'number', min: 2, max: Math.min(16, mode.players || 8), value: Math.min(mode.players || 4, 8) })); port = field('Port', Object.assign(el('input'), { type: 'number', value: 24872 })); }
-      const tip = el('p', 'small muted', psp
-        ? 'Hors de chez toi, tes amis doivent pouvoir joindre ton PC : Arcadia tente l\'ouverture automatique (UPnP) ; sinon ouvre le port TCP 27312 sur ta box. Le plus simple reste la « Salle publique ».'
-        : 'Hors de chez toi, ouvre le port UDP choisi (24872 par défaut) sur ta box vers ce PC.');
-      f.append(tip);
-    } else {
-      ip = field('Adresse de l\'hôte', Object.assign(el('input'), { type: 'text', placeholder: 'ex. 82.65.10.20' }));
-      if (!psp) { port = field('Port', Object.assign(el('input'), { type: 'number', value: 24872 })); pass = field('Mot de passe (si le salon en a un)', Object.assign(el('input'), { type: 'text' })); }
-    }
-    card.append(f);
-    const a = el('div', 'modal-actions');
-    const cancel = el('button', 'btn-ghost', 'Annuler'); cancel.onclick = closeModal;
-    const go = el('button', 'btn-white', role === 'host' ? 'Lancer et héberger' : 'Rejoindre');
-    go.onclick = () => {
-      const o = { type: mode.type, role, server: 'private', ip: ip?.value.trim(), port: port?.value, password: pass?.value, max: max?.value };
-      if (role === 'join' && !o.ip) { ip.focus(); return; }
-      closeModal(); launchMulti(g, o);
-    };
-    a.append(cancel, go); card.append(a);
-  });
-}
-
 async function renderSavesPanel(g) {
   const box = $('#g-saves');
   const r = await arcadia.savesList(g.id).catch(() => null);
@@ -2463,10 +2319,12 @@ const PAD_SVG = {
   xbox: '<svg viewBox="0 0 64 40" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><path d="M16 7h32c6 0 9 4 10 10l2 10c1 6-2 9-6 9-3 0-5-3-7-6H21c-2 3-4 6-7 6-4 0-7-3-6-9l2-10C11 11 10 7 16 7z"/><circle cx="20" cy="16" r="3.6"/><circle cx="38" cy="24" r="3.6"/><path d="M24 24h6M27 21v6"/><circle cx="46" cy="12" r="1.8"/><circle cx="50" cy="16" r="1.8"/><circle cx="42" cy="16" r="1.8"/><circle cx="46" cy="20" r="1.8" fill="currentColor"/></svg>',
   generic: '<svg viewBox="0 0 64 40" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><path d="M16 7h32c6 0 9 4 10 10l2 10c1 6-2 9-6 9-3 0-5-3-7-6H21c-2 3-4 6-7 6-4 0-7-3-6-9l2-10C11 11 10 7 16 7z"/><path d="M19 15h6M22 12v6"/><circle cx="44" cy="15" r="2.2"/><path d="M27 24c2-3 8-3 10 0" stroke-dasharray="2 3"/><path d="M52 4l2 3 3 1-3 1-2 3-2-3-3-1 3-1z" fill="currentColor" stroke="none"/></svg>'
 };
+PAD_SVG.remote = '<svg viewBox="0 0 64 40" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><rect x="8" y="9" width="48" height="24" rx="5"/><path d="M16 21h7M19.5 17.5v7"/><circle cx="44" cy="18" r="1.8" fill="currentColor"/><circle cx="48" cy="22" r="1.8"/><circle cx="40" cy="22" r="1.8"/><path d="M30 4c2-2 4-2 6 0M28 1c3-3 7-3 10 0"/></svg>';
 const PAD_TYPES = [
   ['keyboard', 'Clavier seulement', 'Rien à brancher · voir les touches'],
   ['switch', 'Manette Switch', 'Pro Controller, Joy-Con…'],
   ['xbox', 'Manette Xbox', 'Xbox, MSI, 8BitDo, PowerA…'],
+  ['remote', 'Remote Controller Gamepad', 'Ton téléphone (appli Remote Gamepad), en plus de ta manette'],
   ['generic', 'Autre manette', 'PlayStation, USB générique… calibrage touche par touche']
 ];
 // touches du clavier : positions physiques, affichées avec la disposition réelle (AZERTY, QWERTY…)
@@ -2625,6 +2483,29 @@ function langField(g, gs) {
 }
 
 // BIOS manquant (PS2…) : Arcadia ne peut pas le fournir ; l'utilisateur installe celui de SA console
+// Premier jeu d'une console : son moteur se télécharge une fois (vérifié), puis le jeu se lance
+function packModal(g, need) {
+  return new Promise(resolve => {
+    openModal(card => {
+      card.append(el('h2', '', 'Installation du moteur'));
+      card.append(el('p', '', `Premier jeu ${g.console} : Arcadia télécharge son moteur (${Math.max(1, Math.round(need.size / 1048576))} Mo), une seule fois.`));
+      const bar = el('div', 'upd-bar pack-bar'); const fill = el('div', ''); bar.append(fill);
+      const pct = el('div', 'upd-pct', '0 %'); card.append(bar, pct);
+      const actions = el('div', 'modal-actions'); const cancel = el('button', 'btn-ghost', 'Fermer'); actions.append(cancel); card.append(actions);
+      let closed = false; cancel.onclick = () => { closed = true; closeModal(); resolve(false); };
+      PACKPROG.cb = d => { const v = d.total ? Math.min(100, Math.round(d.got / d.total * 100)) : 0; fill.style.width = v + '%'; pct.textContent = v + ' %'; };
+      arcadia.installPacks(need.packs).then(r => {
+        PACKPROG.cb = null;
+        if (closed) { if (r.ok) toast('Moteur installé : relance le jeu.'); else toast(r.error, true); return; }
+        closeModal();
+        if (!r.ok) toast(r.error, true);
+        resolve(!!r.ok);
+      });
+    });
+  });
+}
+const PACKPROG = { cb: null };
+arcadia.onPacksProgress(d => PACKPROG.cb && PACKPROG.cb(d));
 function biosModal(g, need) {
   openModal(card => {
     card.classList.add('keys-modal');

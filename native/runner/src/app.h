@@ -47,6 +47,13 @@ struct App {
 
   // Entrées
   SDL_Gamepad* pads[4] = {};
+  // Remote Controller Gamepad (téléphone via Remote Gamepad / manette virtuelle) : pilote le joueur 1 au même titre que la manette principale
+  SDL_Gamepad* padRemote = nullptr; bool p1Remote = false, remoteOn = true;
+  SDL_Gamepad* p1() const { return p1Remote && padRemote ? padRemote : pads[0]; }
+  const char* padLabel(SDL_Gamepad* g) const {
+    if (g && (g == padRemote || (SDL_GetGamepadVendor(g) == 0x045E && SDL_GetGamepadProduct(g) == 0x028E))) return "Remote Controller Gamepad";
+    const char* n = g ? SDL_GetGamepadName(g) : nullptr; return n ? n : nullptr;
+  }
   uint16_t padMask[4] = {}; int16_t padAxis[4][6] = {};
   bool guideHeld = false, guideUsed = false;
   // Contrôles réattribuables (fichier partagé avec Arcadia) ; capture d'une touche depuis le menu

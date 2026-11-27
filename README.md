@@ -25,9 +25,10 @@ Arcadia is a Windows game launcher that turns emulators into **engines**: you on
 - **Automatic 60 FPS patches** for Switch, PSP and PS1 games that have one, from public community databases (NX-60FPS-RES-GFX-Cheats, CWCheat-Database-Plus, DuckStation chtdb).
 - **In-game FPS counter**, NVIDIA DLSS for Switch 2 games, custom wallpapers with automatic button palette, neon interface.
 
-- **English & French interface**, chosen at first launch. **Online updates** from this repository's releases, downloaded in the background and checksum-verified.
+- **English & French interface**, chosen at first launch. **Online updates** from this repository's releases (checked every hour, Windows notification when minimized), downloaded in the background and checksum-verified.
 - **PS1 16:9 widescreen** for games that have a DuckStation community widescreen patch.
-- **Mario Kart 8 Deluxe online with friends**: free private rooms, no account or server — one player hosts, the others join with an invite code (same Wi-Fi or Internet, UPnP port opening).
+- **Light installer**: each console's engine downloads once, checksum-verified, the first time you play one of its games (packs on branch [`arcadia-packs`](../../tree/arcadia-packs)).
+- **Remote Controller Gamepad**: your phone (Remote Gamepad app) works like an Xbox controller and drives player 1 alongside it.
 - **Rewind & hold-to-fast-forward** in the built-in engine, **drag & drop** of your own keys / firmware / BIOS, and a **custom Switch profile name**.
 
 ## Install

@@ -1,20 +1,18 @@
 {
   "name": "arcadia",
   "productName": "Arcadia",
-  "version": "1.28.2",
+  "version": "1.32.0",
   "description": "Arcadia — bibliothèque de jeux façon Steam pour émulateurs",
   "main": "main.js",
   "license": "GPL-3.0-or-later",
   "scripts": {
     "start": "electron .",
-    "test": "node test/scan.test.js && node test/config.test.js && node test/switch.test.js && node test/saves.test.js && node test/presets.test.js && node test/extras.test.js && node test/gameinfo.test.js && node test/multiplayer.test.js && node test/romlangs.test.js && node test/controls.test.js",
+    "test": "node test/scan.test.js && node test/config.test.js && node test/switch.test.js && node test/saves.test.js && node test/presets.test.js && node test/extras.test.js && node test/gameinfo.test.js && node test/romlangs.test.js && node test/controls.test.js && node test/net.test.js",
     "dist:win": "electron-builder --win nsis portable --x64"
   },
   "devDependencies": {
-    "@resvg/resvg-js": "^2.6.2",
     "electron": "^33.2.0",
-    "electron-builder": "^25.1.8",
-    "png-to-ico": "^3.0.2"
+    "electron-builder": "^25.1.8"
   },
   "build": {
     "appId": "dev.arcadia.launcher",
@@ -84,7 +82,10 @@
         "from": "runner",
         "to": "runner",
         "filter": [
-          "**/*"
+          "**/*",
+          "!cores/**",
+          "!system/**",
+          "!switch/**"
         ]
       }
     ],

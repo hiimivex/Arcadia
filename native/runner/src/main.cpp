@@ -366,7 +366,7 @@ void App::setVolume(int v) {
 static void RETRO_CALLCONV inputPollCb() {
   if (g_app.ctlWatch.Changed()) ArcadiaControls::Load(g_app.ctlWatch.path, g_app.controls); // réglé depuis Arcadia ou un autre moteur
   for (int p = 0; p < 4; p++) {
-    uint16_t m = 0; SDL_Gamepad* g = g_app.pads[p];
+    uint16_t m = 0; SDL_Gamepad* g = p == 0 ? g_app.p1() : g_app.pads[p];
     namespace AC = ArcadiaControls;
     const bool custom = p == 0 && g_app.controls.loaded;
     if (custom && g_app.controls.device == AC::KEYBOARD) g = nullptr; // clavier seul
@@ -442,7 +442,7 @@ static void RETRO_CALLCONV inputPollCb() {
     float mx, my; SDL_MouseButtonFlags mb = SDL_GetMouseState(&mx, &my);
     int ww, wh; SDL_GetWindowSize(g_app.window, &ww, &wh);
     float k = ww ? (float)g_app.winW / ww : 1.f;
-    SDL_Gamepad* g = g_app.pads[0];
+    SDL_Gamepad* g = g_app.p1();
     bool ds = g_app.console == "DS" || g_app.console == "NDS";
     if (ds && g) {
       float rx = g_app.padAxis[0][2] / 32767.f, ry = g_app.padAxis[0][3] / 32767.f;
@@ -492,8 +492,13 @@ static int16_t RETRO_CALLCONV inputStateCb(unsigned port, unsigned device, unsig
   return 0;
 }
 
-static std::string g_padFirst;
+static std::string g_padFirst, g_padRemote;
 static void openPads();
+// manette virtuelle Xbox 360 (ViGEm, utilisée par Remote Gamepad) ou GUID donné par Arcadia
+static bool isRemotePad(SDL_JoystickID id) {
+  if (!g_padRemote.empty()) { char gb[64]; SDL_GUIDToString(SDL_GetJoystickGUIDForID(id), gb, sizeof gb); if (SDL_strcasecmp(gb, g_padRemote.c_str()) == 0) return true; }
+  return SDL_GetGamepadVendorForID(id) == 0x045E && SDL_GetGamepadProductForID(id) == 0x028E;
+}
 void reopenPads() { openPads(); }
 static void openPads() {
   int n = 0; SDL_JoystickID* ids = SDL_GetGamepads(&n);
@@ -503,8 +508,17 @@ static void openPads() {
     if (g_padFirst == gb) { std::swap(ids[0], ids[i]); break; }
   }
   for (int p = 0; p < 4; p++) if (g_app.pads[p] && !SDL_GamepadConnected(g_app.pads[p])) { SDL_CloseGamepad(g_app.pads[p]); g_app.pads[p] = nullptr; }
+  if (g_app.padRemote && !SDL_GamepadConnected(g_app.padRemote)) { SDL_CloseGamepad(g_app.padRemote); g_app.padRemote = nullptr; g_app.p1Remote = false; }
+  // une vraie manette branchée : le téléphone se joint au joueur 1 au lieu de devenir joueur 2
+  bool real = false; for (int i = 0; i < n; i++) if (!isRemotePad(ids[i])) real = true;
+  if (g_app.remoteOn && real && !g_app.padRemote) for (int i = 0; i < n; i++) if (isRemotePad(ids[i])) {
+    for (int p = 0; p < 4; p++) if (g_app.pads[p] && SDL_GetGamepadID(g_app.pads[p]) == ids[i]) { SDL_CloseGamepad(g_app.pads[p]); g_app.pads[p] = nullptr; }
+    g_app.padRemote = SDL_OpenGamepad(ids[i]); break;
+  }
+  if (!real && g_app.padRemote) { SDL_CloseGamepad(g_app.padRemote); g_app.padRemote = nullptr; g_app.p1Remote = false; } // seul : manette normale
+  for (int p = 0; p + 1 < 4; p++) if (!g_app.pads[p]) for (int q = p + 1; q < 4; q++) if (g_app.pads[q]) { g_app.pads[p] = g_app.pads[q]; g_app.pads[q] = nullptr; break; }
   for (int i = 0; i < n; i++) {
-    bool have = false; for (auto* g : g_app.pads) if (g && SDL_GetGamepadID(g) == ids[i]) have = true;
+    bool have = g_app.padRemote && SDL_GetGamepadID(g_app.padRemote) == ids[i]; for (auto* g : g_app.pads) if (g && SDL_GetGamepadID(g) == ids[i]) have = true;
     if (have) continue;
     for (int p = 0; p < 4; p++) if (!g_app.pads[p]) { g_app.pads[p] = SDL_OpenGamepad(ids[i]); break; }
   }
@@ -714,8 +728,15 @@ static void handleEvent(SDL_Event& e) {
     else if (!g_app.menuOpen && e.key.key == SDLK_F8) g_app.loadSlot(1);
     else if (!g_app.menuOpen && e.key.key == SDLK_TAB) g_app.setSpeed(g_app.speedMode == 1 ? 0 : 1);
     break;
+  case SDL_EVENT_GAMEPAD_AXIS_MOTION:
+    if (g_app.padRemote && (e.gaxis.value > 16000 || e.gaxis.value < -16000)) g_app.p1Remote = e.gaxis.which == SDL_GetGamepadID(g_app.padRemote) ? true : (g_app.pads[0] && e.gaxis.which == SDL_GetGamepadID(g_app.pads[0]) ? false : g_app.p1Remote);
+    break;
   case SDL_EVENT_GAMEPAD_BUTTON_DOWN: {
     auto b = (SDL_GamepadButton)e.gbutton.button;
+    if (g_app.padRemote) { // la dernière manette touchée pilote le joueur 1
+      if (e.gbutton.which == SDL_GetGamepadID(g_app.padRemote)) g_app.p1Remote = true;
+      else if (g_app.pads[0] && e.gbutton.which == SDL_GetGamepadID(g_app.pads[0])) g_app.p1Remote = false;
+    }
     if (b == SDL_GAMEPAD_BUTTON_GUIDE) { g_app.guideHeld = true; g_app.guideUsed = false; break; }
     if (g_app.guideHeld && !g_app.menuOpen) { guideCombo(b); break; }
     SDL_Gamepad* g = SDL_GetGamepadFromID(e.gbutton.which);
@@ -792,6 +813,8 @@ int main(int argc, char** argv) {
   g_app.padLayout = argOf(argc, argv, "--pad-layout", "xbox");
   if (hasArg(argc, argv, "--no-hint")) g_app.hintOff = true; // aide des contrôles désactivée dans Arcadia
   g_padFirst = argOf(argc, argv, "--pad-first");
+  g_padRemote = argOf(argc, argv, "--pad-remote");
+  if (hasArg(argc, argv, "--no-remote-pad")) g_app.remoteOn = false;
   g_app.ctlWatch.path = argOf(argc, argv, "--controls");
   if (!g_app.ctlWatch.path.empty()) { ArcadiaControls::Load(g_app.ctlWatch.path, g_app.controls); g_app.ctlWatch.Touch(); }
 

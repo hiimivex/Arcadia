@@ -157,7 +157,7 @@ function edenFamily(id, name, dirName, consoles) {
         { id: 'keys', label: 'Installer les clés de déchiffrement…', desc: 'Copie prod.keys (+ title.keys et key_retail.bin s\'ils sont à côté) dans le dossier keys.' },
         { id: 'firmware', label: 'Installer le Firmware…', desc: 'Dossier ou .zip contenant les fichiers .nca. L\'ancien firmware est gardé dans registered.old.' },
         { id: 'openData', label: `Ouvrir le dossier de ${name}`, desc: 'Sauvegardes, clés, NAND, shaders…' },
-        { id: 'openEmu', label: `Ouvrir ${name}`, desc: 'Pour l\'assignation des touches, les amiibo, le multijoueur.' }
+        { id: 'openEmu', label: `Ouvrir ${name}`, desc: 'Pour l\'assignation des touches et les amiibo.' }
       ] }
     ]
   };

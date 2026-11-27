@@ -549,7 +549,7 @@ body.bp-on .toast { z-index: 1000; }
 .modal-card.input-modal { width: min(860px, 94vw); }
 .input-modal h2.center, .input-modal p.center { text-align: center; }
 .input-modal p.strong { color: #fff; font-weight: 700; font-size: 16px; margin: 0; }
-.in-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 18px 0 6px; }
+.in-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin: 18px 0 6px; }
 .in-opt { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 16px 14px 14px; border-radius: 20px; border: 1px solid var(--line); background: var(--panel-2); color: #ddd; cursor: pointer; text-align: left; transition: .15s; }
 .in-opt b { font-size: 15px; color: #fff; }
 .in-opt span { font-size: 12px; color: var(--muted); line-height: 1.4; }

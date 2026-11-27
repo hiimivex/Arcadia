@@ -3,6 +3,7 @@
 ;   <dossier Arcadia>/Jeux, /Émulateurs, /Sauvegardes : jamais supprimés
 Unicode true
 SetCompressor /SOLID lzma
+SetCompressorDictSize 64
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
 !include "LogicLib.nsh"

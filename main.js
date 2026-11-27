@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, protocol, net, shell, globalShortcut, screen, desktopCapturer, nativeImage, systemPreferences } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, protocol, net, shell, globalShortcut, screen, desktopCapturer, nativeImage, systemPreferences, Notification } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -10,7 +10,6 @@ const { SCHEMAS, resolveFile, allFields } = require('./src/emuschemas');
 const { readValues, writeValues, saveFile } = require('./src/configfiles');
 const GameInfo = require('./src/gameinfo');
 const I18N = require('./renderer/i18n.js');
-const Multi = require('./src/multiplayer');
 const SwitchCfg = require('./src/switchcfg');
 const Proc = require('./src/proctl');
 const Brand = require('./src/brand');
@@ -156,7 +155,7 @@ app.whenReady().then(() => {
 
 app.whenReady().then(() => {
   if (helper.available) helper.start(); watchUpdates();
-  setTimeout(() => checkGithubUpdate(false), 20000); setInterval(() => checkGithubUpdate(false), 6 * 3600e3);
+  setTimeout(() => checkGithubUpdate(false), 20000); setInterval(() => checkGithubUpdate(false), 3600e3);
 });
 app.on('before-quit', () => { helper.stop(); try { backupStore(store.file, path.join(savesRoot(), '_arcadia')); } catch { /* */ } });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
@@ -187,10 +186,10 @@ function setupRoot() {
   // où tourne Arcadia (et quelle version) : les mises à jour visent toujours la bonne installation
   try { fs.writeFileSync(path.join(ROOT, '.arcadia-app.json'), JSON.stringify({ version: app.getVersion(), exe: app.getPath('exe'), resources: process.resourcesPath, at: new Date().toISOString() }, null, 1)); } catch { /* dossier en lecture seule */ }
   const lib = LIB_DIR(), emu = EMU_DIR();
-  fs.mkdirSync(lib, { recursive: true });
-  fs.mkdirSync(emu, { recursive: true });
   // dossier absent, ou vidé parce que son contenu a été rangé dans Arcadia -> on bascule
   const curLib = store.get('libraryDir'), curEmu = store.get('emulatorsDir');
+  if (!curLib || !exists(curLib) || inside(curLib, lib)) fs.mkdirSync(lib, { recursive: true }); // pas de dossier « Jeux » vide si la bibliothèque est ailleurs
+  fs.mkdirSync(emu, { recursive: true }); // données du moteur Arcadia (BIOS, sauvegardes…)
   // premier lancement : on ne choisit pas à la place de l'utilisateur, la fenêtre d'accueil lui demande son dossier
   if (curLib && (!exists(curLib) || (!inside(curLib, lib) && !scanLibrary(curLib).length)) && scanLibrary(lib).length) store.set('libraryDir', lib);
   if (!exists(curEmu) || (!inside(curEmu, emu) && !Object.keys(detectEmulators(curEmu)).length && Object.keys(detectEmulators(emu)).length)) store.set('emulatorsDir', emu);
@@ -768,7 +767,16 @@ async function checkGithubUpdate(manual) {
     const asset = (rel.assets || []).find(a => new RegExp(`^Arcadia-Setup-${version.replace(/\./g, '\\.')}\\.exe$`, 'i').test(a.name));
     if (!asset) return { ok: false, error: `Version ${version} publiée sans installateur` };
     ghRelease = { version, asset };
-    if (ghNotified !== version || manual) { ghNotified = version; win?.webContents.send('app:update', { version, online: true }); }
+    if (ghNotified !== version || manual) {
+      ghNotified = version; win?.webContents.send('app:update', { version, online: true });
+      // notification Windows quand Arcadia est réduit ou en arrière-plan
+      if (!manual && (!win || win.isMinimized() || !win.isFocused() || !win.isVisible()) && Notification.isSupported()) {
+        const en = settings().uiLang === 'en';
+        const n = new Notification({ title: en ? `Arcadia ${version} is available` : `Arcadia ${version} est disponible`, body: en ? 'Click to open Arcadia and install the update.' : 'Clique pour ouvrir Arcadia et installer la mise à jour.', icon: exists(ARCADIA_ICO()) ? ARCADIA_ICO() : undefined });
+        n.on('click', () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); win.webContents.send('app:update', { version, online: true }); } });
+        n.show();
+      }
+    }
     return { ok: true, version, available: true };
   } catch (e) {
     log?.write('INFO', `mise à jour en ligne : ${e.message}`);
@@ -935,6 +943,63 @@ function biosFiles(id) {
   const b = BIOS[id]; if (!b) return [];
   try { return fs.readdirSync(path.join(runnerSystem(), b.dir)).filter(n => b.test(n) && b.size.includes(fs.statSync(path.join(runnerSystem(), b.dir, n)).size)); } catch { return []; }
 }
+// ---------------------------------------------------------------- moteurs à la demande (téléchargés au premier jeu)
+const Packs = require('./src/packs');
+const DLL = process.platform === 'win32' ? '.dll' : '.so';
+function packsDir() { return path.join(runnerData(), 'packs'); }
+function packStamp(name) { return path.join(name.startsWith('system-') ? runnerSystem() : packsDir(), `.pack-${name}`); }
+function packInstalled(name) { try { return fs.readFileSync(packStamp(name), 'utf8').trim() === Packs.PACKS[name].sha256; } catch { return false; } }
+// Cœur : livré avec Arcadia (développement) ou dans les moteurs téléchargés ; null si inconnu
+function coreLib(core) {
+  const local = path.join(runnerDir(), 'cores', core + DLL);
+  if (exists(local)) return { lib: local, packs: [] };
+  const lib = path.join(packsDir(), 'cores', core + DLL);
+  const packs = Packs.corePacks(core).filter(n => !packInstalled(n));
+  if (!Packs.PACKS['core-' + core] && !exists(lib)) return null;
+  if (exists(path.join(runnerDir(), 'system'))) return { lib, packs: packs.filter(n => !n.startsWith('system-')) };
+  return { lib, packs };
+}
+// Moteurs à télécharger avant de lancer ce jeu
+function missingPacks(setup, g) {
+  if (!setup) return [];
+  if (setup.runner) return setup.packs || [];
+  const sw = (g.console === 'SWITCH' || g.console === 'SWITCH 2') && SWITCH_EMUS.includes(setup.emulator);
+  const gsx = (store.get('gameSettings') || {})[g.id] || {};
+  if (sw && (setup.exe === arcadiaSwitchExe() || (settings().switchEngine !== 'eden' && gsx.fallback !== app.getVersion())) && !localSwitchExe() && !packInstalled('switch')) return ['switch'];
+  return [];
+}
+let packJob = null;
+async function installPacks(names) {
+  if (packJob) return packJob;
+  packJob = (async () => {
+    const todo = [...new Set(names)].filter(n => Packs.PACKS[n] && !packInstalled(n));
+    const total = todo.reduce((a, n) => a + Packs.PACKS[n].size, 0); let done = 0;
+    const send = got => win?.webContents.send('packs:progress', { got: done + got, total });
+    for (const name of todo) {
+      const P = Packs.PACKS[name], tmp = path.join(app.getPath('temp'), `arcadia-${name}-${process.pid}.zip`);
+      const r = await net.fetch(Packs.url(name));
+      if (!r.ok || !r.body) throw new Error(`téléchargement impossible (HTTP ${r.status})`);
+      const out = fs.createWriteStream(tmp), h = crypto.createHash('sha256'); let got = 0, last = 0;
+      const reader = r.body.getReader();
+      for (;;) { const { done: end, value } = await reader.read(); if (end) break; const b = Buffer.from(value); out.write(b); h.update(b); got += b.length; if (Date.now() - last > 250) { last = Date.now(); send(got); } }
+      await new Promise(res => out.end(res));
+      if (h.digest('hex') !== P.sha256) { try { fs.unlinkSync(tmp); } catch { /* */ } throw new Error('fichier abîmé pendant le téléchargement, réessaie'); }
+      const dst = name.startsWith('system-') ? runnerSystem() : path.join(packsDir(), name.startsWith('core-') ? 'cores' : name);
+      for (const z of require('./src/ziplite').readZip(tmp)) {
+        if (z.name.endsWith('/')) continue;
+        const f = path.resolve(dst, z.name); if (!f.startsWith(path.resolve(dst) + path.sep)) continue;
+        fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, z.data());
+      }
+      try { fs.unlinkSync(tmp); } catch { /* */ }
+      fs.mkdirSync(path.dirname(packStamp(name)), { recursive: true }); fs.writeFileSync(packStamp(name), P.sha256);
+      done += P.size; send(0); log?.write('INFO', `moteur téléchargé : ${name}`);
+    }
+    return { ok: true };
+  })().catch(e => ({ ok: false, error: `Moteur non installé : ${e.message}` })).finally(() => { packJob = null; });
+  return packJob;
+}
+ipcMain.handle('packs:install', (_e, names) => installPacks(Array.isArray(names) ? names : []));
+
 function runnerFor(consoleId) {
   const list = RUNNER_CORES[consoleId];
   if (!list) return null;
@@ -943,10 +1008,10 @@ function runnerFor(consoleId) {
   if (!exists(exe)) return null;
   for (const c of list) {
     const core = typeof c === 'string' ? c : c.core, bios = typeof c === 'string' ? null : c.bios;
-    const lib = path.join(dir, 'cores', core + (process.platform === 'win32' ? '.dll' : '.so'));
-    if (!exists(lib)) continue;
+    const c2 = coreLib(core);
+    if (!c2) continue;
     if (bios && !biosFiles(bios).length) continue;
-    return { exe, core: lib, system: runnerSystem(), coreName: core };
+    return { exe, core: c2.lib, system: runnerSystem(), coreName: core, packs: c2.packs };
   }
   return null;
 }
@@ -954,7 +1019,7 @@ function runnerFor(consoleId) {
 function runnerNeedsBios(consoleId) {
   for (const c of RUNNER_CORES[consoleId] || []) {
     if (typeof c === 'string' || !c.bios || BIOS[c.bios].optional) continue;
-    if (exists(path.join(runnerDir(), 'cores', c.core + (process.platform === 'win32' ? '.dll' : '.so'))) && !biosFiles(c.bios).length) return c.bios;
+    if (coreLib(c.core) && !biosFiles(c.bios).length) return c.bios;
   }
   return null;
 }
@@ -1168,7 +1233,8 @@ function padDbUpsert(mapping) {
 function padRunnerArgs() {
   const inp = settings().input, args = [];
   if (inp && inp.guid && inp.type !== 'keyboard') args.push('--pad-first', inp.guid);
-  args.push('--pad-layout', inp && inp.type && inp.type !== 'keyboard' ? inp.type : 'xbox', '--pad-db', padDbPath());
+  args.push('--pad-layout', inp && inp.type && !['keyboard', 'remote'].includes(inp.type) ? inp.type : 'xbox', '--pad-db', padDbPath());
+  if (inp && inp.type === 'remote' && inp.guid) args.push('--pad-remote', inp.guid); // Remote Controller Gamepad : joueur 1 avec l'autre manette
   if (settings().controlsHint === false) args.push('--no-hint');
   return args;
 }
@@ -1187,7 +1253,7 @@ function runCalibration({ layout = 'xbox', full = false } = {}) { return new Pro
   const exe = path.join(runnerDir(), process.platform === 'win32' ? 'arcadia-runner.exe' : 'arcadia-runner');
   if (!exists(exe)) return resolve({ ok: false, error: 'Moteur Arcadia introuvable : réinstalle Arcadia.' });
   if (calibChild) try { calibChild.kill(); } catch { /* déjà fermé */ }
-  const args = ['--calibrate', '--layout', layout, ...(full ? ['--full'] : []), ...(exists(padDbPath()) ? ['--pad-db', padDbPath()] : [])];
+  const args = ['--calibrate', '--layout', layout === 'remote' ? 'xbox' : layout, ...(full ? ['--full'] : []), ...(exists(padDbPath()) ? ['--pad-db', padDbPath()] : [])];
   const child = calibChild = require('child_process').spawn(exe, args, { cwd: path.dirname(exe), stdio: ['ignore', 'pipe', 'pipe'] });
   let buf = '', result = null;
   child.stdout.on('data', d => {
@@ -1313,9 +1379,11 @@ function backupFor(g, force) {
 // ---------------------------------------------------------------- Switch : clés et firmware
 const SWITCH_EMUS = ['eden', 'lichii', 'edencli'];
 // Moteur Switch d'Arcadia (Eden recompilé : manette + clavier lus par Arcadia, vibrations, nom et icône Arcadia)
+const SWITCH_BIN = process.platform === 'win32' ? 'arcadia-switch.exe' : 'arcadia-switch';
+function localSwitchExe() { const e = path.join(runnerDir(), 'switch', SWITCH_BIN); return exists(e) ? e : null; }
+// livré avec Arcadia (développement), sinon téléchargé au premier jeu Switch (chemin rendu même avant le téléchargement)
 function arcadiaSwitchExe() {
-  const e = path.join(runnerDir(), 'switch', process.platform === 'win32' ? 'arcadia-switch.exe' : 'arcadia-switch');
-  return exists(e) ? e : null;
+  return localSwitchExe() || (process.platform === 'win32' && Packs.PACKS.switch ? path.join(packsDir(), 'switch', SWITCH_BIN) : null);
 }
 // Dossier de données d'un émulateur Switch (portable « user » à côté de l'exe, sinon AppData)
 function switchDataDir(exe, id) {
@@ -1337,6 +1405,7 @@ function switchTargets() {
   for (const m of Object.values(store.get('mapping') || {})) if (SWITCH_EMUS.includes(m.emulator) && exists(m.exe)) all[m.emulator] = m.exe;
   for (const id of SWITCH_EMUS) if (all[id]) dirs.add(switchDataDir(all[id], id));
   if (arcadiaSwitchExe()) dirs.add(switchDataDir(arcadiaSwitchExe(), 'edencli')); // moteur Switch d'Arcadia
+  dirs.add(path.join(app.getPath('appData'), 'eden')); // le moteur Switch (même pas encore téléchargé) lit ici
   for (const d of [EMU_DIR(), store.get('emulatorsDir')].filter(exists)) { const e = path.join(d, 'Eden', 'user'); if (exists(path.dirname(e))) dirs.add(e); } // Eden à venir
   return [...dirs];
 }
@@ -1966,6 +2035,8 @@ function startGame(id, opts = {}) {
   if (running.has(id)) return { ok: false, error: `${g.title} est déjà lancé.` };
   try {
     const setup = setupFor(g, opts.external);
+    const pk = missingPacks(setup, g);
+    if (pk.length) return { ok: false, needPack: { packs: pk, size: pk.reduce((a, n) => a + Packs.PACKS[n].size, 0), label: g.console }, error: 'Moteur à télécharger.' };
     if (!setup) { // aucun émulateur externe pour prendre le relais
       const nb = runnerNeedsBios(g.console);
       if (nb) return { ok: false, needBios: { console: nb, label: BIOS[nb].label }, error: `${BIOS[nb].label} manquant.` };
@@ -1984,11 +2055,10 @@ function startGame(id, opts = {}) {
       const gsx = (store.get('gameSettings') || {})[id] || {};
       const asw = settings().switchEngine !== 'eden' && gsx.fallback !== app.getVersion() ? arcadiaSwitchExe() : null; // Switch 1 et 2
       if (asw && cpuInfo().sse42 === false) return { ok: false, error: 'Ton processeur ne prend pas en charge SSE4.2, indispensable au moteur Switch : les jeux Switch ne peuvent pas tourner sur ce PC.' };
-      if (opts.switchArgs && !asw) return { ok: false, error: 'Le multijoueur en ligne passe par le moteur Switch d\'Arcadia : remets « Moteur Switch » sur Arcadia dans les Paramètres.' };
       if (asw) {
-        const guid = (settings().input || {}).guid || '';
+        const guid = (settings().input || {}).type === 'remote' ? '' : (settings().input || {}).guid || ''; // téléphone : il rejoint la vraie manette
         try { SwitchCfg.prepare(need.dir, { opts: { ...Langs.switchOpts(gameLang(g)), ...swEngineOpts(id) }, arcadia: true }); } catch (e) { log?.write('INFO', `réglages Switch : ${e.message}`); }
-        engine = { exe: asw, args: (opts.switchArgs ? opts.switchArgs + ' ' : '') + KNOWN_EMULATORS.edencli.args, env: { ARCADIA: '1', ARCADIA_USER_DIR: need.dir, ARCADIA_TITLE: `${decorate(g).title} — Arcadia`, ARCADIA_PAD_DB: exists(padDbPath()) ? padDbPath() : '', ARCADIA_PAD_GUID: guid, ARCADIA_CONTROLS: controlsFile(g.console), ARCADIA_STATS: statsFile(), ARCADIA_LIVE: path.join(need.dir, 'arcadia-live.ini'), ARCADIA_MOUSE: extOpts(id)['Arcadia/mouse'] || 'camera' } };
+        engine = { exe: asw, args: KNOWN_EMULATORS.edencli.args, env: { ARCADIA: '1', ARCADIA_USER_DIR: need.dir, ARCADIA_TITLE: `${decorate(g).title} — Arcadia`, ARCADIA_PAD_DB: exists(padDbPath()) ? padDbPath() : '', ARCADIA_PAD_GUID: guid, ARCADIA_CONTROLS: controlsFile(g.console), ARCADIA_STATS: statsFile(), ARCADIA_LIVE: path.join(need.dir, 'arcadia-live.ini'), ARCADIA_MOUSE: extOpts(id)['Arcadia/mouse'] || 'camera' } };
         log?.write('INFO', 'moteur Switch d\'Arcadia');
       } else if (setup.emulator !== 'lichii') {
         const inp = settings().input || {}, guid = inp.guid || '';
@@ -2042,14 +2112,6 @@ function startGame(id, opts = {}) {
       const engineCrash = engine ? (code !== 0 && code != null) : setup?.runner ? !!error : false;
       const byUs = closedByArcadia.has(pid);
       closedByArcadia.delete(pid);
-      // partie en ligne : le moteur Switch se ferme s'il ne peut pas rejoindre le salon → message clair, jamais de moteur de secours
-      if (opts.switchArgs && engineCrash && !byUs && Date.now() - t0 < 90000) {
-        log?.write('MULTI', `connexion au salon impossible (code ${code})`);
-        win?.webContents.send('game:error', { id, error: opts.netHost
-          ? 'Mario Kart n\'a pas pu se connecter à ton propre salon : ferme le salon, puis héberge à nouveau.'
-          : 'Impossible de rejoindre le salon de ton ami. Vérifie : 1) qu\'il a cliqué sur « Héberger » et que son salon est toujours ouvert, 2) que le code est le dernier qu\'il t\'a envoyé, 3) hors de chez lui, que sa box laisse passer le port UDP 24872 vers son PC (et que Windows a autorisé « arcadia-room »).' });
-        return;
-      }
       if (early && engineCrash) {
         const backup = engine ? setup : setupFor(g, true);
         if (backup && !(engine ? false : backup.runner)) {
@@ -2227,83 +2289,7 @@ ipcMain.handle('game:details', async (_e, id, force) => {
   return det;
 });
 
-// ---------------------------------------------------------------- multijoueur
-function lanAddrs() {
-  const out = [];
-  for (const list of Object.values(require('os').networkInterfaces())) for (const a of list || []) if (a.family === 'IPv4' && !a.internal) out.push(a.address);
-  return out;
-}
-let PUBLIC_IP = null;
-async function publicIp() {
-  if (PUBLIC_IP) return PUBLIC_IP;
-  try { const r = await net.fetch('https://api.ipify.org?format=json'); if (r.ok) PUBLIC_IP = (await r.json()).ip; } catch { /* hors ligne */ }
-  return PUBLIC_IP;
-}
-function azaharFiles() {
-  const exe = emuCtx('azahar').exe;
-  if (!exe) return null;
-  const room = path.join(path.dirname(exe), process.platform === 'win32' ? 'azahar-room.exe' : 'azahar-room');
-  return { exe, room: exists(room) ? room : null };
-}
-// Ce que le jeu propose en multi, et ce qu'Arcadia sait brancher sur CE PC
-ipcMain.handle('game:multi', async (_e, id) => {
-  const g = games.find(x => x.id === id);
-  if (!g) return null;
-  const info = Multi.lookup(g.console, decorate(g).title);
-  const setup = setupFor(g);
-  for (const m of info.modes) {
-    if (m.engine === 'runner' && !setup?.runner) { m.ready = false; m.why = 'Le multi PSP passe par le moteur intégré : active « Jouer avec le moteur Arcadia » dans les Paramètres.'; }
-    if (m.engine === 'azahar') { const a = azaharFiles(); if (!a) { m.ready = false; m.why = 'Azahar n\'est pas installé.'; } else m.canHost = !!a.room; }
-  }
-  return { ...info, lan: lanAddrs(), public: await publicIp() };
-});
-// Lancer en multi. o = { type, role: 'host'|'join', server: 'public'|'private', ip, port, password, max, nickname }
-const rooms = new Map();
-ipcMain.handle('game:playMulti', async (_e, id, o) => {
-  const g = games.find(x => x.id === id);
-  if (!g) return { ok: false, error: 'Jeu introuvable.' };
-  const title = decorate(g).title;
-  if (o.type === 'adhoc') {
-    const opts = { ppsspp_enable_wlan: 'enabled', ppsspp_enable_upnp: 'enabled', ppsspp_enable_builtin_pro_ad_hoc_server: 'disabled' };
-    let notice;
-    if (o.server === 'public') { opts.ppsspp_change_pro_ad_hoc_server_address = 'socom.cc'; notice = 'Multijoueur : salle publique socom.cc. Va dans le mode multi « ad hoc » du jeu.'; }
-    else if (o.role === 'host') { opts.ppsspp_enable_builtin_pro_ad_hoc_server = 'enabled'; opts.ppsspp_change_pro_ad_hoc_server_address = 'localhost'; notice = 'Tu héberges la partie. Va dans le mode multi « ad hoc » du jeu et attends tes amis.'; }
-    else {
-      const d = Multi.ipDigits(o.ip);
-      if (!d) return { ok: false, error: 'Adresse IP invalide (ex. 82.65.10.20).' };
-      Object.assign(opts, d, { ppsspp_change_pro_ad_hoc_server_address: 'IP address' });
-      notice = `Connecté à la partie de ${o.ip}. Va dans le mode multi « ad hoc » du jeu.`;
-    }
-    const runnerArgs = [...Object.entries(opts).flatMap(([k, v]) => ['--opt', `${k}=${v}`]), '--notice', notice];
-    log?.write('MULTI', `${title} : ad hoc ${o.server}/${o.role} ${o.ip || ''}`);
-    return startGame(id, { runnerArgs });
-  }
-  if (o.type === 'wireless') {
-    const a = azaharFiles();
-    if (!a) return { ok: false, error: 'Azahar n\'est pas installé.' };
-    const port = String(parseInt(o.port, 10) || 24872);
-    let onExit = null;
-    if (o.role === 'host') {
-      if (!a.room) return { ok: false, error: 'Le serveur de salon d\'Azahar (azahar-room.exe) est introuvable : réinstalle Azahar.' };
-      const args = ['--room-name', `Arcadia · ${title}`.slice(0, 60), '--port', port, '--max_members', String(Math.max(2, Math.min(16, parseInt(o.max, 10) || 4))), '--preferred-app', title];
-      if (o.password) args.push('--password', o.password);
-      const child = require('child_process').spawn(a.room, args, { cwd: path.dirname(a.room), stdio: 'ignore', windowsHide: true });
-      child.on('error', e => log?.write('MULTI', `salon : ${e.message}`));
-      rooms.set(id, child);
-      onExit = () => { try { child.kill(); } catch { /* déjà arrêté */ } rooms.delete(id); };
-    }
-    // Azahar ne sait pas rejoindre un salon en ligne de commande : on pré-remplit « Connexion directe »
-    const w = writeEmu('azahar', { 'Multiplayer/ip': o.role === 'host' ? '127.0.0.1' : String(o.ip || '').trim(), 'Multiplayer/port': port },
-      [{ key: 'Multiplayer/ip', type: 'text', default: '' }, { key: 'Multiplayer/port', type: 'text', default: '24872' }]);
-    if (!w.ok) log?.write('MULTI', `pré-remplissage Azahar : ${w.error}`);
-    log?.write('MULTI', `${title} : salon 3DS ${o.role} port ${port}`);
-    const r = startGame(id, { onExit, external: true }); // le salon 3DS passe par Azahar (le cœur intégré n'a pas de réseau)
-    if (!r.ok && onExit) onExit();
-    return { ...r, manual: true };
-  }
-  return { ok: false, error: 'Ce type de multijoueur n\'est pas encore branché.' };
-});
-
+// ---------------------------------------------------------------- profil de joueur
 // Profil de joueur des jeux Switch : Eden crée un profil « Eden » ; Arcadia le renomme avec le nom choisi
 // (seul le nom change : l'identifiant du profil, donc les sauvegardes, reste le même).
 const PROFILE_REL = path.join('nand', 'system', 'save', '8000000000000010', 'su', 'avators', 'profiles.dat');
@@ -2333,155 +2319,29 @@ function setSwitchProfileName(dir, name) {
   fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, buf);
   return true;
 }
+// Nettoyage unique (1.31) : règles de pare-feu et ouverture de port laissées par l'ancien multijoueur
+setTimeout(() => {
+  try {
+    if (!store) return;
+    let dirty = false;
+    for (const k of ['upnpOpen']) if (k in store.data) { delete store.data[k]; dirty = true; }
+    if (settings().netName !== undefined) { const s = { ...store.data.settings }; delete s.netName; store.data.settings = s; dirty = true; }
+    if (dirty) store.save();
+    if (process.platform !== 'win32' || settings().fwCleaned) return;
+    const has = n => require('child_process').spawnSync('netsh', ['advfirewall', 'firewall', 'show', 'rule', `name=${n}`], { windowsHide: true }).status === 0;
+    const names = ['Arcadia salon Switch', 'Arcadia salon Switch (box)'].filter(has);
+    store.data.settings = { ...settings(), fwCleaned: true }; store.save();
+    if (!names.length) return;
+    const cmd = '/c ' + names.map(n => `netsh advfirewall firewall delete rule name="${n}"`).join(' & ');
+    require('child_process').spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `Start-Process -FilePath cmd.exe -ArgumentList '${cmd.replace(/'/g, "''")}' -Verb RunAs -WindowStyle Hidden`], { windowsHide: true, stdio: 'ignore' }).on('error', () => {});
+    log?.write('INFO', `anciennes règles de pare-feu du multijoueur : suppression demandée (${names.join(', ')})`);
+  } catch { /* sans gravité */ }
+}, 12000);
 ipcMain.handle('switch:profileName', (_e, name) => {
   const n = cleanProfileName(name);
   store.data.settings = { ...settings(), switchProfile: n }; store.save();
   let ok = 0; for (const d of switchTargets()) { try { if (setSwitchProfileName(d, n)) ok++; } catch (e) { log?.write('INFO', `profil Switch : ${e.message}`); } }
   return { ok: true, name: n, count: ok, state: snapshot() };
-});
-
-// ---------------------------------------------------------------- Switch en ligne entre amis (salon privé, gratuit, sans serveur)
-// L'hôte lance le salon du moteur Switch (arcadia-room) sur son PC et ouvre le port de sa box (UPnP) ;
-// ses amis le rejoignent avec un code d'invitation. Dans le jeu : mode « Sans fil local ».
-const Invite = require('./src/invite');
-const UPnP = require('./src/upnp');
-const SW_ROOM_PORT = 24872;
-const SWNET = { room: null, port: SW_ROOM_PORT, password: null, code: null, upnp: null, gameId: null };
-const MK8D = '0100152000022000';
-function aswRoomExe() { const e = path.join(runnerDir(), 'switch', process.platform === 'win32' ? 'arcadia-room.exe' : 'arcadia-room'); return exists(e) ? e : null; }
-function netName() {
-  const raw = settings().switchProfile || settings().netName || require('os').userInfo().username || 'Joueur';
-  let n = raw.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9._ -]/g, '').trim().slice(0, 14) || 'Joueur';
-  while (n.length < 4) n += '_';
-  return `${n}-${Math.floor(10 + Math.random() * 90)}`; // deux joueurs avec le même nom ne sont pas refusés
-}
-const isPrivateIp = ip => /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(ip);
-function mainLanIp() { const l = lanAddrs(); return l.find(isPrivateIp) || l[0] || null; }
-function swnetStop() {
-  if (SWNET.room) { try { SWNET.room.kill(); } catch { /* déjà arrêté */ } SWNET.room = null; }
-  if (SWNET.upnp?.close) SWNET.upnp.close().then(ok => { log?.write('MULTI', `port ${SWNET.port} de la box ${ok ? 'refermé' : 'non refermé (il expirera seul)'}`); if (ok && store) { delete store.data.upnpOpen; store.save(); } });
-  SWNET.upnp = null; SWNET.code = null; SWNET.gameId = null;
-}
-// Au démarrage : port laissé ouvert par un arrêt brutal → refermé
-setTimeout(() => {
-  const o = store?.data?.upnpOpen; if (!o) return;
-  UPnP.closePort({ fetch: (u, x) => net.fetch(u, x), port: o.port, protocol: o.protocol || 'UDP' }).then(ok => {
-    log?.write('MULTI', `port ${o.port} resté ouvert après un arrêt brutal : ${ok ? 'refermé' : 'box injoignable'}`);
-    if (ok) { delete store.data.upnpOpen; store.save(); }
-  });
-}, 8000);
-app.on('will-quit', swnetStop);
-// Passerelle par défaut (la box), lue dans la table de routage Windows
-function defaultGateway() {
-  try {
-    if (process.platform !== 'win32') return null;
-    const out = require('child_process').spawnSync('route', ['print', '-4', '0.0.0.0'], { encoding: 'utf8', windowsHide: true }).stdout || '';
-    const m = /^\s*0\.0\.0\.0\s+0\.0\.0\.0\s+(\d+\.\d+\.\d+\.\d+)\s/m.exec(out);
-    return m ? m[1] : null;
-  } catch { return null; }
-}
-// Pare-feu Windows : règle entrante pour le serveur de salon (une seule autorisation administrateur, la première fois)
-const FW_RULE = 'Arcadia salon Switch';
-function fwRuleOk(exe) {
-  if (process.platform !== 'win32') return true;
-  const r = require('child_process').spawnSync('netsh', ['advfirewall', 'firewall', 'show', 'rule', `name=${FW_RULE}`, 'verbose'], { encoding: 'utf8', windowsHide: true });
-  const box = require('child_process').spawnSync('netsh', ['advfirewall', 'firewall', 'show', 'rule', `name=${FW_RULE} (box)`], { encoding: 'utf8', windowsHide: true });
-  return r.status === 0 && String(r.stdout || '').toLowerCase().includes(exe.toLowerCase()) && box.status === 0;
-}
-function fwRuleAdd(exe) {
-  return new Promise(resolve => {
-    const q = s => s.replace(/'/g, "''");
-    const self = app.getPath('exe');
-    const cmdline = `/c netsh advfirewall firewall delete rule name="${FW_RULE}" & netsh advfirewall firewall add rule name="${FW_RULE}" dir=in action=allow program="${exe}" protocol=UDP localport=${SW_ROOM_PORT} profile=any enable=yes`
-      + ` & netsh advfirewall firewall delete rule name="${FW_RULE} (box)" & netsh advfirewall firewall add rule name="${FW_RULE} (box)" dir=in action=allow program="${self}" protocol=UDP remoteip=LocalSubnet profile=any enable=yes`;
-    const ps = `Start-Process -FilePath cmd.exe -ArgumentList '${q(cmdline)}' -Verb RunAs -WindowStyle Hidden -Wait`;
-    const ch = require('child_process').spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { windowsHide: true, stdio: 'ignore' });
-    ch.on('exit', () => resolve(fwRuleOk(exe))); ch.on('error', () => resolve(false));
-  });
-}
-// 1) ouvrir le salon et préparer le code (le jeu n'est pas encore lancé)
-ipcMain.handle('swnet:host', async (_e, id) => {
-  const g = games.find(x => x.id === id);
-  if (!g) return { ok: false, error: 'Jeu introuvable.' };
-  const exe = aswRoomExe();
-  if (!exe) return { ok: false, error: 'Le serveur de salon du moteur Switch (arcadia-room.exe) est introuvable : réinstalle Arcadia.' };
-  swnetStop();
-  let firewall = fwRuleOk(exe) ? 'ok' : null;
-  if (!firewall) { firewall = (await fwRuleAdd(exe)) ? 'ok' : 'refused'; log?.write('MULTI', `règle du pare-feu Windows : ${firewall}`); }
-  const title = decorate(g).title, tid = String(decorate(g).titleId || titleIdFrom(g.file) || MK8D);
-  SWNET.password = Invite.newPassword();
-  const ban = path.join(app.getPath('userData'), 'salon-bans.json');
-  const args = ['--room-name', `Arcadia · ${title}`.slice(0, 60), '--port', String(SWNET.port), '--max-members', '8', '--password', SWNET.password,
-    '--preferred-game', title, '--preferred-game-id', tid, '--ban-list-file', ban];
-  const child = require('child_process').spawn(exe, args, { cwd: path.dirname(exe), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
-  let out = '';
-  child.stdout.on('data', d => { out += d; }); child.stderr.on('data', d => { out += d; });
-  child.on('exit', code => { if (SWNET.room === child) { SWNET.room = null; log?.write('MULTI', `salon Switch fermé (code ${code}) ${out.slice(-300)}`); } });
-  child.on('error', e => log?.write('MULTI', `salon Switch : ${e.message}`));
-  SWNET.room = child; SWNET.gameId = id;
-  await new Promise(r => setTimeout(r, 1200));
-  if (!SWNET.room) return { ok: false, error: `Le salon n'a pas pu s'ouvrir (port ${SWNET.port} déjà pris ?).` };
-  const lan = mainLanIp();
-  SWNET.upnp = lan ? await UPnP.openPort({ fetch: (u, o) => net.fetch(u, o), port: SWNET.port, protocol: 'UDP', localIp: lan, description: 'Arcadia - salon Switch' }) : { ok: false, error: 'pas de réseau local' };
-  if (!SWNET.upnp.ok && lan) { // pas d'UPnP : on tente NAT-PMP auprès de la box
-    const viaPmp = await UPnP.openPortPmp({ gateway: defaultGateway(), port: SWNET.port, protocol: 'UDP' });
-    log?.write('MULTI', `UPnP : ${SWNET.upnp.error} ; NAT-PMP : ${viaPmp.ok ? 'ok' : viaPmp.error}`);
-    if (viaPmp.ok) SWNET.upnp = viaPmp; else SWNET.upnp.error = `UPnP : ${SWNET.upnp.error} · NAT-PMP : ${viaPmp.error}`;
-  }
-  if (SWNET.upnp.ok) { store.data.upnpOpen = { port: SWNET.port, protocol: 'UDP', at: Date.now(), lease: SWNET.upnp.lease }; store.save(); }
-  const pub = (SWNET.upnp.ok && SWNET.upnp.externalIp && !isPrivateIp(SWNET.upnp.externalIp) ? SWNET.upnp.externalIp : null) || await publicIp();
-  // box derrière une autre box ou adresse partagée de l'opérateur (CGNAT, fréquent en 4G/5G) : impossible d'héberger par Internet
-  const ext = SWNET.upnp.ok ? SWNET.upnp.externalIp : null;
-  const cgnat = !!ext && (isPrivateIp(ext) || /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(ext) || (pub && ext !== pub));
-  SWNET.code = Invite.encode({ publicIp: pub, lanIp: lan, port: SWNET.port, password: SWNET.password });
-  log?.write('MULTI', `salon Switch ouvert pour ${title} · LAN ${lan} · public ${pub} · UPnP ${SWNET.upnp.ok ? 'ok' : SWNET.upnp.error}`);
-  return { ok: true, code: SWNET.code, lan, public: pub, upnp: SWNET.upnp.ok, upnpVia: SWNET.upnp.via || 'UPnP', upnpError: SWNET.upnp.ok ? null : SWNET.upnp.error, port: SWNET.port, firewall, cgnat };
-});
-ipcMain.handle('swnet:stop', () => { swnetStop(); return { ok: true }; });
-const inv_lan = code => (Invite.decode(code) || {}).lanIp;
-// Le salon répond-il ? Demande de connexion ENet (protocole des salons) : toute réponse = joignable
-function probeRoom(host, port, timeout = 3000) {
-  return new Promise(resolve => {
-    const sock = require('dgram').createSocket('udp4');
-    let done = false;
-    const end = ok => { if (done) return; done = true; try { sock.close(); } catch { /* */ } resolve(ok); };
-    sock.on('message', (_m, rinfo) => { if (rinfo.port === port) end(true); });
-    sock.on('error', () => end(false));
-    const b = Buffer.alloc(4 + 4 + 44);
-    b.writeUInt16BE(0x8000 | 0x0FFF, 0); b.writeUInt16BE(Date.now() & 0xffff, 2);        // en-tête : pas encore de pair, heure d'envoi
-    b.writeUInt8(0x80 | 2, 4); b.writeUInt8(0xff, 5); b.writeUInt16BE(1, 6);             // commande CONNECT (accusé demandé)
-    let o = 8;
-    b.writeUInt16BE(0, o); o += 2; b.writeUInt8(0xff, o++); b.writeUInt8(0xff, o++);       // pair sortant, sessions
-    for (const v of [1392, 32768, 1, 0, 0, 5000, 2, 2, (Math.random() * 0xffffffff) >>> 0, 0]) { b.writeUInt32BE(v, o); o += 4; }
-    const send = () => { if (!done) sock.send(b, port, host, () => {}); };
-    send(); setTimeout(send, 700); setTimeout(send, 1500);
-    setTimeout(() => end(false), timeout);
-  });
-}
-// 2) lancer le jeu de l'hôte (connecté à son propre salon) ou d'un ami (code d'invitation)
-ipcMain.handle('swnet:play', async (_e, id, code) => {
-  let addr, port, password;
-  if (code) {
-    const inv = Invite.decode(code);
-    if (!inv) return { ok: false, error: 'Code d\'invitation invalide : vérifie qu\'il est complet.' };
-    port = inv.port; password = inv.password;
-    // on teste les deux routes (réseau local et Internet) : beaucoup de box utilisent les mêmes adresses 192.168.1.x
-    const cands = [inv.lanIp, inv.publicIp].filter(Boolean);
-    if (!cands.length) return { ok: false, error: 'Ce code ne contient pas d\'adresse joignable.' };
-    const res = await Promise.all(cands.map(a => probeRoom(a, port).then(ok => ({ a, ok }))));
-    log?.write('MULTI', `test du salon : ${res.map(r => `${r.a === inv.lanIp ? 'local' : 'Internet'} ${r.ok ? 'répond' : 'muet'}`).join(', ')}`);
-    const hit = res.find(r => r.ok);
-    if (!hit) return { ok: false, error: `Le salon de ton ami ne répond pas, ni en réseau local ni par Internet. S'il n'est pas chez toi : sa box doit laisser passer le port UDP ${port} vers son PC (sa fenêtre « Héberger » doit afficher « ✓ Par Internet »). Sinon, essayez dans l'autre sens : c'est toi qui héberges.` };
-    addr = hit.a;
-  } else {
-    if (!SWNET.room || SWNET.gameId !== id) return { ok: false, error: 'Le salon est fermé : héberge à nouveau.' };
-    addr = '127.0.0.1'; port = SWNET.port; password = SWNET.password;
-  }
-  const host = !code;
-  log?.write('MULTI', `Switch en ligne : ${host ? 'hôte' : 'invité'} → ${addr}:${port}`);
-  const r = startGame(id, { skipResume: true, netHost: host, switchArgs: `-m "${netName()}:${password}@${addr}:${port}"`, onExit: host ? swnetStop : null });
-  if (!r.ok && host) swnetStop();
-  return r;
 });
 
 // ---------------------------------------------------------------- IPC : 1.5
@@ -2505,7 +2365,6 @@ async function engineInventory() {
   const add = async (label, exe) => { if (!exe || !exists(exe)) { list.push({ label, present: false }); return; } const st = fs.statSync(exe); let ver = null; try { ver = fs.readFileSync(path.join(path.dirname(exe), 'VERSION_ARCADIA.txt'), 'utf8').trim(); } catch { /* moteur livré avec Arcadia */ } list.push({ label, present: true, path: exe.replace(require('os').homedir(), '~'), size: st.size, sha256: await sha256File(exe), version: ver }); };
   await add('arcadia-runner', path.join(runnerDir(), process.platform === 'win32' ? 'arcadia-runner.exe' : 'arcadia-runner'));
   await add('arcadia-switch', arcadiaSwitchExe());
-  await add('arcadia-room', aswRoomExe());
   const mapping = store.get('mapping') || {};
   for (const [c, m] of Object.entries(mapping)) if (m && m.exe) await add(`${c} → ${m.emulator}`, m.exe);
   return list;
@@ -2526,7 +2385,6 @@ ipcMain.handle('app:report', async () => {
     try { info.engines = await engineInventory(); } catch (e) { info.engines = String(e.message); }
     info.switchEngine = settings().switchEngine || 'arcadia';
     info.fallbacks = Object.entries(store.get('gameSettings') || {}).filter(([, v]) => v && v.fallback).map(([k, v]) => ({ game: k, fallback: v.fallback }));
-    info.firewallRoom = (() => { try { const e = aswRoomExe(); return e ? fwRuleOk(e) : null; } catch { return null; } })();
     entries.unshift({ name: 'infos.json', data: Buffer.from(JSON.stringify(info, null, 2)) });
     const out = path.join(app.getPath('desktop'), `Arcadia-rapport-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.zip`);
     require('./src/ziplite').writeZip(out, entries);

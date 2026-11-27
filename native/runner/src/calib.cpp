@@ -38,6 +38,7 @@ static const int kN = sizeof kSteps / sizeof kSteps[0];
 
 static std::string guidStr(SDL_JoystickID id) { char b[64]; SDL_GUIDToString(SDL_GetJoystickGUIDForID(id), b, sizeof b); return b; }
 static std::string cleanName(const char* n) { std::string s = n ? n : "Manette"; for (auto& c : s) if (c == ',') c = ' '; return s; }
+static std::string padNameFor(SDL_JoystickID id) { if (SDL_GetJoystickVendorForID(id) == 0x045E && SDL_GetJoystickProductForID(id) == 0x028E) return "Remote Controller Gamepad"; return cleanName(SDL_GetJoystickNameForID(id)); }
 
 int runCalibration(int argc, char** argv) {
   auto arg = [&](const char* k, const char* d) -> std::string { for (int i = 1; i + 1 < argc; i++) if (!strcmp(argv[i], k)) return argv[i + 1]; return d; };
@@ -93,7 +94,7 @@ int runCalibration(int argc, char** argv) {
     v.hint = s == kN - 1 ? "Espace pour passer si ta manette n'en a pas" : "Espace : passer   ·   Retour arrière : étape précédente   ·   Échap : annuler";
   };
   auto finish = [&]() {
-    std::string name = cleanName(SDL_GetJoystickNameForID(pad)), g = guidStr(pad);
+    std::string name = padNameFor(pad), g = guidStr(pad);
     std::string m;
     if (v.known && !full) { char* gm = SDL_GetGamepadMappingForID(pad); if (gm) { m = gm; SDL_free(gm); } }
     else {
@@ -107,7 +108,7 @@ int runCalibration(int argc, char** argv) {
   };
   auto accept = [&](const std::string& val) {
     if (v.phase == 0) {
-      v.known = SDL_IsGamepad(pad); v.padName = cleanName(SDL_GetJoystickNameForID(pad));
+      v.known = SDL_IsGamepad(pad); v.padName = padNameFor(pad);
       if (v.known && !full) { v.phase = 2; doneAt = SDL_GetTicks(); finish(); }
       else { v.phase = 1; setStep(0); }
       waitRelease = true; return;
